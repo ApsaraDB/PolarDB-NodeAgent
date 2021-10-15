@@ -1,0 +1,11 @@
+{
+  "scan": false,
+  "scan_period": 60,
+  "production": false,
+  "level": "INFO",
+  "filename": "/opt/db-monitor/log/db-monitor.log",
+  "compress": true,
+  "max_size_mb": 50,
+  "max_backups": 20,
+  "max_age_days": 7
+}

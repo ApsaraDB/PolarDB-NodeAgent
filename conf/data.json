@@ -1,0 +1,7 @@
+{
+  "filename": "/opt/db-monitor/data/data",
+  "compress": true,
+  "max_size_mb": 64,
+  "max_backups": 5,
+  "max_age_days": 3
+}

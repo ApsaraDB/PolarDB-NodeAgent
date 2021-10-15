@@ -1,0 +1,9 @@
+collector:
+    database:
+        socketpath: "/tmp"
+        username: "postgres"
+        database: "postgres"
+
+service:
+    netdev: "*"
+    port:    819

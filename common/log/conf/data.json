@@ -1,0 +1,7 @@
+{
+  "filename": "/tmp/data",
+  "compress": false,
+  "max_size_mb": 50,
+  "max_backups": 50,
+  "max_age_days": 7
+}

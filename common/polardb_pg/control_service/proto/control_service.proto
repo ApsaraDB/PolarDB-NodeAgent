@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package polardb;
+
+message InsSpec {
+    string host = 1;
+    int32  port = 2;
+    string username = 3;
+    string password = 4;
+    string database = 5;
+    string instype = 6; // "db", "maxscale", "cm"
+}
+
+message SyncInstanceRequest {
+    string system_identify = 1;
+    string logical_insname = 4;
+    InsSpec ins = 2;
+    InsSpec rw = 3;
+}
+
+message SyncInstanceResponse {
+  // 返回码
+  int32 code = 1;
+  string msg = 2;
+}
+
+service ControlService {
+   // 下发实例元信息(有密码敏感信息，UE不存储实例元信息，UE进程重启后丢失实例信息，需要CM一直下发实例元信息，类型心跳机制)
+   rpc SyncInstance(SyncInstanceRequest) returns (SyncInstanceResponse);
+}

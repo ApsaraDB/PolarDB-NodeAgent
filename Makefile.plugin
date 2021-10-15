@@ -1,0 +1,19 @@
+include common.mk
+
+PLUGIN_DIR=plugins/*
+SUBDIRS := $(wildcard ${PLUGIN_DIR})
+
+.PHONY: force
+
+$(SUBDIRS): force
+	for dir in $(SUBDIRS); do \
+		$(MAKE) -C $$dir ; \
+	done \
+
+all : $(SUBDIRS)
+
+clean:
+	for dir in $(SUBDIRS); \
+		do $(MAKE) -C $$dir clean ;\
+	done \
+
