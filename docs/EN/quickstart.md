@@ -2,6 +2,10 @@
 
 This document describes how to install and run db-monitor and view the collected performance data.
 
+For PolarDB for PostgreSQL, db-monitor writes the monitoring data back to the database by default, and provides views in the database for query. You can also push the monitoring data to prometheus pushgateway after configuration. For details about configuration, refer to [Configuration Document](configuration.md).
+
+In addition, for the scenario where the monitoring data is stored in the database, db-monitor also provides you a grafana dashboard for easy display.
+
 ## Installation
 
 There are two ways to install db-monitor: Installing by compiling source code and by by building RPM package.
@@ -27,6 +31,7 @@ Install Go. For details about how to install golang, refer to https://golang.org
 
    ```
    sh build.sh
+   ```
 
 3. Install, and it will be installed in `/opt/db-monitor` by default.
 
@@ -42,6 +47,7 @@ Install Go. For details about how to install golang, refer to https://golang.org
 
    ```
    git clone git@github.com:ApsaraDB/db-monitor.git
+   ```
 
 2. Enter the `rpm` directory and build RPM package, and the RPM package is in `$HOME/rpmbuild/RPMS/`.
 
@@ -82,6 +88,17 @@ For all the metrics and data description, refer to [Metrics Introduction](metric
 ### Grafana
 
 In addition to the database view, you can also get a more intuitive view with grafana by importing the configuration of grafana dashboard. It is recommended to use the latest version of grafana 8.2.1. See the official documentation for installation and deployment.
+
+
+#### Before You Start
+
+* Authentication: Set the access configuration of the database in `pg_hba.conf`, if external access needed.
+* Authorization: For non-super users, you need to grant `polar_gawr_user` role to your user account:
+
+```
+GRANT polar_gawr_user TO [your username];
+```
+
 
 #### Add Data Source
 
