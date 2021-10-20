@@ -156,6 +156,7 @@ func (runner *Runner) runProcessorBackends(
 					log.String("module", ins.pInfo.Name),
 					log.String("backend", backend),
 					log.Int("port", ins.port),
+					log.String("ctx", fmt.Sprintf("%+v", backCtxMap)),
 					log.String("err", err.Error()))
 			}
 		} else {
@@ -165,6 +166,7 @@ func (runner *Runner) runProcessorBackends(
 					log.String("module", ins.pInfo.Name),
 					log.String("backend", backend),
 					log.Int("port", ins.port),
+					log.String("ctx", fmt.Sprintf("%+v", backCtxMap)),
 					log.String("err", err.Error()))
 			}
 		}

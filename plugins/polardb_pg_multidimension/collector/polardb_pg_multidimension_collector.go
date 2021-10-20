@@ -53,7 +53,7 @@ const (
 	CollectMaxDBVersion          = MaxDBVersion
 	DBConfigCheckVersionInterval = 5
 	DBConnTimeout                = 10
-	DBQueryTimeout               = 10
+	DBQueryTimeout               = 60
 	basePath                     = "base_path"
 	KEY_SEND_TO_MULTIBACKEND     = "send_to_multibackend"
 )
@@ -542,14 +542,16 @@ func (c *PolarDBPgMultidimensionCollector) initQueries(queryContexts []interface
 		var err error
 		if err = c.dbConfig.InitFromDBConfig(c.ConfigMap, c.cInfo.querymap,
 			c.dbInfo.role == RW); err != nil {
-			c.logger.Error("init from db config failed", err)
 			if c.dbInfo.role != RW {
+				c.cInfo.dbConfigVersion = -1
 				c.logger.Info("we may need to wait for RW init")
+			} else {
+				c.logger.Error("init from db config failed", err)
+				return err
 			}
-			return err
 		}
 
-		if c.dbInfo.role != DataMax {
+		if err == nil && c.dbInfo.role != DataMax {
 			if c.cInfo.dbConfigVersion, err = c.dbConfig.GetDBConfigVersion(); err != nil {
 				c.logger.Error("init from db config version failed", err)
 				return err
@@ -1161,7 +1163,7 @@ func (c *PolarDBPgMultidimensionCollector) prepareObjects() error {
 		if err := c.execDB(queryCtx.Query); err != nil {
 			c.logger.Warn("exec collect init sql failed", err, log.String("query", queryCtx.Query))
 		} else {
-			c.logger.Debug("exec collect init sql succeed", log.String("query", queryCtx.Query))
+			c.logger.Info("exec collect init sql succeed", log.String("query", queryCtx.Query))
 		}
 	}
 
@@ -1541,10 +1543,10 @@ func (c *PolarDBPgMultidimensionCollector) checkIfNeedRestart() error {
 						return err
 					}
 					c.cInfo.dbConfigNeedUpdate = false
-					c.cInfo.dbConfigVersion = version
 					c.logger.Info("db config version update",
 						log.Int64("old version", c.cInfo.dbConfigVersion),
 						log.Int64("new version", version))
+					c.cInfo.dbConfigVersion = version
 				}
 
 				if c.cInfo.enableDBConfigCenter {
@@ -1563,10 +1565,10 @@ func (c *PolarDBPgMultidimensionCollector) checkIfNeedRestart() error {
 							return err
 						}
 						c.cInfo.dbConfigNeedUpdate = false
-						c.cInfo.dbConfigCenterVersion = version
-						c.logger.Info("db config version update",
-							log.Int64("old version", c.cInfo.dbConfigVersion),
+						c.logger.Info("db config center version update",
+							log.Int64("old version", c.cInfo.dbConfigCenterVersion),
 							log.Int64("new version", version))
+						c.cInfo.dbConfigCenterVersion = version
 					}
 				}
 

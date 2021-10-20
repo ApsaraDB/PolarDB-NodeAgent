@@ -18,7 +18,7 @@
  * limitations under the License.
  *
  * IDENTIFICATION
- *           plugins/polardb_pg/polardb_pg.go
+ *           plugins/polardb_pg_opensource/polardb_pg.go
  *-------------------------------------------------------------------------
  */
 package main
@@ -26,11 +26,11 @@ package main
 import (
 	"errors"
 
-	"github.com/ApsaraDB/db-monitor/plugins/polardb_pg/service"
+	"github.com/ApsaraDB/db-monitor/plugins/polardb_pg_opensource/service"
 
 	_ "github.com/lib/pq"
 	"github.com/ApsaraDB/db-monitor/common/log"
-	pg "github.com/ApsaraDB/db-monitor/plugins/polardb_pg/collector"
+	pg "github.com/ApsaraDB/db-monitor/plugins/polardb_pg_opensource/collector"
 )
 
 func PluginInit(ctx interface{}) (interface{}, error) {

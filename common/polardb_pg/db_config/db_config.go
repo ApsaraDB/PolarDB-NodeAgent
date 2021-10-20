@@ -180,8 +180,8 @@ func (d *DBConfig) GetConfigCenterDBConfigVersion() (int64, error) {
 
 	rows, err := d.configcenterdb.QueryContext(ctx, SQL_MARK+query)
 	if err != nil {
-		d.logger.Warn("get db config version failed", err)
-		return int64(0), nil
+		d.logger.Warn("exec get db config center version sql failed", err)
+		return int64(0), err
 	}
 	defer rows.Close()
 
@@ -189,7 +189,7 @@ func (d *DBConfig) GetConfigCenterDBConfigVersion() (int64, error) {
 		var version int64
 		if err := rows.Scan(&version); err != nil {
 			d.logger.Warn("scan db version failed", err)
-			return int64(0), nil
+			return int64(0), err
 		}
 
 		return version, nil
@@ -206,8 +206,8 @@ func (d *DBConfig) GetDBConfigVersion() (int64, error) {
 
 	rows, err := d.db.QueryContext(ctx, SQL_MARK+query)
 	if err != nil {
-		d.logger.Warn("get db config version failed", err)
-		return int64(0), nil
+		d.logger.Warn("exec get db config version sql failed", err)
+		return int64(0), err
 	}
 	defer rows.Close()
 
@@ -215,7 +215,7 @@ func (d *DBConfig) GetDBConfigVersion() (int64, error) {
 		var version int64
 		if err := rows.Scan(&version); err != nil {
 			d.logger.Warn("scan db version failed", err)
-			return int64(0), nil
+			return int64(0), err
 		}
 
 		return version, nil

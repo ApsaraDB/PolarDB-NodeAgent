@@ -18,7 +18,7 @@
  * limitations under the License.
  *
  * IDENTIFICATION
- *           plugins/polardb_pg/service/polardb_pg_service.go
+ *           plugins/polardb_pg_opensource/service/polardb_pg_service.go
  *-------------------------------------------------------------------------
  */
 

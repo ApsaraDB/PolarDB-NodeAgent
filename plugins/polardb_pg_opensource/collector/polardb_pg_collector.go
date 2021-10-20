@@ -18,7 +18,7 @@
  * limitations under the License.
  *
  * IDENTIFICATION
- *           plugins/polardb_pg/collector/polardb_pg_collector.go
+ *           plugins/polardb_pg_opensource/collector/polardb_pg_collector.go
  *-------------------------------------------------------------------------
  */
 package collector
@@ -59,7 +59,7 @@ const (
 	CollectMinDBVersion   = 90200
 	CollectMaxDBVersion   = MaxDBVersion
 	DBConnTimeout         = 10
-	DBQueryTimeout        = 10
+	DBQueryTimeout        = 60
 	plutoPluginIdentifier = "golang-collector-pluto"
 
 	DefaultLocalDiskCollectInterval = 15
@@ -671,14 +671,16 @@ func (c *PolarDBPgCollector) initQueries(queryContexts []interface{}) error {
 		var err error
 		if err = c.dbConfig.InitFromDBConfig(c.ConfigMap,
 			c.cInfo.querymap, c.dbInfo.role == RW); err != nil {
-			c.logger.Error("init from db config failed", err)
 			if c.dbInfo.role != RW {
+				c.cInfo.dbConfigVersion = -1
 				c.logger.Info("we may need to wait for RW init")
+			} else {
+				c.logger.Error("init from db config failed", err)
+				return err
 			}
-			return err
 		}
 
-		if c.dbInfo.role != DataMax {
+		if err == nil && c.dbInfo.role != DataMax {
 			if c.cInfo.dbConfigVersion, err = c.dbConfig.GetDBConfigVersion(); err != nil {
 				c.logger.Error("init from db config version failed", err)
 				return err
@@ -1045,20 +1047,15 @@ ERROR:
 
 func (c *PolarDBPgCollector) prepareExtensions() error {
 	for _, extension := range c.dbInfo.extensions {
-		err := c.execDB(fmt.Sprintf("DROP EXTENSION IF EXISTS %s CASCADE", extension))
-		if err != nil {
-			c.logger.Warn("drop extension failed.", err, log.String("extension", extension))
-		}
-
-		err = c.execDB(fmt.Sprintf("CREATE EXTENSION IF NOT EXISTS %s CASCADE", extension))
+		err := c.execDB(fmt.Sprintf("CREATE EXTENSION IF NOT EXISTS %s", extension))
 		if err != nil {
 			c.logger.Warn("create extension failed.", err, log.String("extension", extension))
 		}
 
-		// err = c.execDB(fmt.Sprintf("ALTER EXTENSION %s UPDATE", extension))
-		// if err != nil {
-		// 	c.logger.Warn("update extension failed.", err, log.String("extension", extension))
-		// }
+		err = c.execDB(fmt.Sprintf("ALTER EXTENSION %s UPDATE", extension))
+		if err != nil {
+			c.logger.Warn("update extension failed.", err, log.String("extension", extension))
+		}
 	}
 
 	return nil
@@ -1382,10 +1379,10 @@ func (c *PolarDBPgCollector) checkIfNeedRestart() error {
 			return err
 		}
 		c.cInfo.dbConfigNeedUpdate = false
-		c.cInfo.dbConfigVersion = version
 		c.logger.Info("db config version update",
 			log.Int64("old version", c.cInfo.dbConfigVersion),
 			log.Int64("new version", version))
+		c.cInfo.dbConfigVersion = version
 	}
 
 	if c.cInfo.enableDBConfigCenter {
@@ -1404,10 +1401,10 @@ func (c *PolarDBPgCollector) checkIfNeedRestart() error {
 				return err
 			}
 			c.cInfo.dbConfigNeedUpdate = false
-			c.cInfo.dbConfigCenterVersion = version
-			c.logger.Info("db config version update",
-				log.Int64("old version", c.cInfo.dbConfigVersion),
+			c.logger.Info("db config center version update",
+				log.Int64("old version", c.cInfo.dbConfigCenterVersion),
 				log.Int64("new version", version))
+			c.cInfo.dbConfigCenterVersion = version
 		}
 	}
 
@@ -1606,6 +1603,8 @@ func (c *PolarDBPgCollector) Collect(out map[string]interface{}) error {
 	}
 
 	if c.GetConfigMapValue(c.ConfigMap, "enable_db_metric_collect", "integer", 1).(int) == 1 {
+		c.dbInfo.db.Exec("SET log_min_messages=FATAL")
+
 		if err := c.collectDBStat(out); err != nil {
 			c.logger.Warn("collect db stat failed.", err)
 		}
