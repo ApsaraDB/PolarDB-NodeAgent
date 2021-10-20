@@ -2,6 +2,9 @@
 
 本文档介绍了如何安装和运行db-monitor，并查看采集到的监控数据。
 
+对于PolarDB-for-PostgreSQL, db-monitor默认把将监控数据写回数据库, 并在数据库内提供视图以供查询, 也可通过配置将监控数据推送给prometheus pushgateway, 具体配置可见[配置文档](configuration.md).
+此外, 对于监控数据存入数据库的场景, 还配有grafana dashboard方便展示.
+
 ## 安装
 
 目前提供两种安装部署的方式：源码编译安装及RPM包安装，两种方式均需安装相关依赖。
@@ -14,6 +17,7 @@
 
    ```
    git clone git@github.com:ApsaraDB/db-monitor.git
+   ```
 
 2. 编译
 
@@ -27,6 +31,7 @@
 
    ```
    sh build.sh
+   ```
 
 3. 安装, 默认安装路径为`/opt/db-monitor`
 
@@ -42,11 +47,13 @@
 
    ```
    git clone git@github.com:ApsaraDB/db-monitor.git
+   ```
 
 2. 在源码目录下进入到 `rpm` 子目录，构建RPM包, 完成后RPM包在`$HOME/rpmbuild/RPMS/`路径下。
 
    ```
    rpmbuild -bb polardb-monitor.spec
+   ```
 
 3. 执行`yum install`或者`rpm -ivh`对RPM包进行安装。
 
@@ -79,6 +86,14 @@ sh bin/service.sh restart
 
 除数据库视图之外，目前还提供更直观的grafana展示，可以通过导入grafana dashboard配置的形式进行查看。
 推荐使用最新版本的grafana 8.2.1，安装部署可见官方文档。
+
+#### 前置条件
+
+* 认证: 需要合理设置数据库的访问配置, 即`pg_hba.conf`, 以便外部访问
+* 鉴权: 对于非超级用户, 需要赋予 `polar_gawr_user` 权限:
+```
+GRANT polar_gawr_user TO [用户名]
+```
 
 #### 添加数据源
 

@@ -4,7 +4,9 @@
 
 db-monitor has been tested in real projects on Alibaba Cloud.
 
-Read this docs in other languages: [中文](README_cn.md)
+Currently, db-monitor open source supports monitoring data collection of PolarDB for PostgreSQL.
+
+Read this doc in other languages: [中文](README_cn.md)
 
 ## Documents
 
