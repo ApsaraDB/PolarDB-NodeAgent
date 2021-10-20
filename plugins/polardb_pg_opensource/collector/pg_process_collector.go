@@ -18,7 +18,7 @@
  * limitations under the License.
  *
  * IDENTIFICATION
- *           plugins/polardb_pg/collector/pg_process_collector.go
+ *           plugins/polardb_pg_opensource/collector/pg_process_collector.go
  *-------------------------------------------------------------------------
  */
 package collector

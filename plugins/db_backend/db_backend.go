@@ -36,10 +36,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/ApsaraDB/db-monitor/common/consts"
 	"github.com/ApsaraDB/db-monitor/common/log"
-	"github.com/ApsaraDB/db-monitor/common/utils"
 	"github.com/ApsaraDB/db-monitor/common/polardb_pg/control_service"
 	"github.com/ApsaraDB/db-monitor/common/polardb_pg/db_config"
 	"github.com/ApsaraDB/db-monitor/common/polardb_pg/meta"
+	"github.com/ApsaraDB/db-monitor/common/utils"
 	"github.com/ApsaraDB/db-monitor/plugins/db_backend/dao"
 )
 
@@ -334,6 +334,11 @@ func PluginRun(ctx interface{}, param interface{}) error {
 					log.String("ins port", port),
 					log.String("data type", data_type))
 				return nil
+			} else {
+				if role != "RW" {
+					log.Info("[db_backend] we are not RW and we don't get RW's topology, do nothing")
+					return nil
+				}
 			}
 		}
 	} else if backendLocation == "remote" {
