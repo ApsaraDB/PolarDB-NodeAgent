@@ -1,10 +1,11 @@
 # 配置
 
-*以下配置均为数据库和db-mointor的默认配置, 如无特殊需求可以略过*
+*以下配置均为数据库和PolarDB-NodeAgent
+的默认配置, 如无特殊需求可以略过*
 
 ## 数据库发现
-由于`db-monitor`部署于每一台数据库实例运行的主机, 每台主机上`db-monitor`只采集本节点数据库实例的监控信息, 为了减少外部因素对于监控采集的干扰, `db-monitor`将通过unix domain socket与数据库进行通信。`db-monitor`与数据库之间推荐使用 peer authentication 的免密认证方式，免密范围可以限定在以指定操作系统账户启动的进程使用指定数据库账号通过 unix domain socket 的方式访问指定数据库。
-为了简化配置，建议每台主机上所有数据库实例共用一个unix domain socket目录，统一提供相同的采集专用数据库账号, `db-monitor`会周期性地遍历unix domain socket目录进行实例发现。
+由于`PolarDB-NodeAgent`部署于每一台数据库实例运行的主机, 每台主机上`PolarDB-NodeAgent`只采集本节点数据库实例的监控信息, 为了减少外部因素对于监控采集的干扰, `PolarDB-NodeAgent`将通过unix domain socket与数据库进行通信。`PolarDB-NodeAgent`与数据库之间推荐使用 peer authentication 的免密认证方式，免密范围可以限定在以指定操作系统账户启动的进程使用指定数据库账号通过 unix domain socket 的方式访问指定数据库。
+为了简化配置，建议每台主机上所有数据库实例共用一个unix domain socket目录，统一提供相同的采集专用数据库账号, `PolarDB-NodeAgent`会周期性地遍历unix domain socket目录进行实例发现。
 
 ### 数据库配置
 #### 连接配置
@@ -41,7 +42,7 @@ local   postgres        polardb                                peer map=collecto
 
 上述配置变更完成后需要重启数据库实例生效.
 
-### db-monitor
+### PolarDB-NodeAgent
 在/opt/db-mointor/conf/monitor.yaml文件中, 需要根据实际情况进行以下配置, 以便`db-monitor`能顺利发现当前节点启动的数据库实例.
 ```
 collector:
@@ -196,7 +197,7 @@ polar_gawr_collection.rollback_collection_to_default(
 
 ## 存储
 监控数据在采集后支持写入指定存储后端, 具体配置如下
-### db-monitor plugin配置
+### PolarDB-NodeAgent plugin配置
 目前仅支持在UE中设置, 每一个采集插件均可对应一个或多个存储后端, 当前因为历史原因有两个数据库采集插件, 后续会合二为一:
 |插件|    说明    |配置文件|
 |  ----  | ----  | ---- |
@@ -213,7 +214,7 @@ polar_gawr_collection.rollback_collection_to_default(
 }
 ```
 
-### db-monitor backend配置
+### PolarDB-NodeAgent backend配置
 目前支持以下两种backend, backend目前配置较为繁琐, 后续会做简化:
 |backend|    说明    |详细配置|
 |  ----  | ----  | ---- |
@@ -289,4 +290,5 @@ scrape_configs:
     scrape_timeout: 60s
 ```
 
-需要重启db-monitor生效, 重启方式见前文.
+需要重启PolarDB-NodeAgent
+生效, 重启方式见前文.
