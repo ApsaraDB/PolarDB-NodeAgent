@@ -1,23 +1,23 @@
 # Quick Start
 
-This document describes how to install and run db-monitor and view the collected performance data.
+This document describes how to install and run PolarDB-NodeAgent and view the collected performance data.
 
-For PolarDB for PostgreSQL, db-monitor writes the monitoring data back to the database by default, and provides views in the database for query. You can also push the monitoring data to prometheus pushgateway after configuration. For details about configuration, refer to [Configuration Document](configuration.md).
+For PolarDB for PostgreSQL, PolarDB-NodeAgent writes the monitoring data back to the database by default, and provides views in the database for query. You can also push the monitoring data to prometheus pushgateway after configuration. For details about configuration, refer to [Configuration Document](configuration.md).
 
-In addition, for the scenario where the monitoring data is stored in the database, db-monitor also provides you a grafana dashboard for easy display.
+In addition, for the scenario where the monitoring data is stored in the database, PolarDB-NodeAgent also provides you a grafana dashboard for easy display.
 
 ## Installation
 
-There are two ways to install db-monitor: Installing by compiling source code and by by building RPM package.
+There are two ways to install PolarDB-NodeAgent: Installing by compiling source code and by by building RPM package.
 
 ### Install Dependence
 Install Go. For details about how to install golang, refer to https://golang.org/doc/install.
 
 ### Compile Source Code and Install
-1. Download the source code of db-monitor.
+1. Download the source code of PolarDB-NodeAgent.
 
    ```
-   git clone git@github.com:ApsaraDB/db-monitor.git
+   git clone git@github.com:ApsaraDB/PolarDB-NodeAgent.git
 
 2. Compile.
 
@@ -43,10 +43,10 @@ Install Go. For details about how to install golang, refer to https://golang.org
 
 ### Build RPM Package and Install
 
-1. Download the source code of db-monitor.
+1. Download the source code of PolarDB-NodeAgent.
 
    ```
-   git clone git@github.com:ApsaraDB/db-monitor.git
+   git clone git@github.com:ApsaraDB/PolarDB-NodeAgent.git
    ```
 
 2. Enter the `rpm` directory and build RPM package, and the RPM package is in `$HOME/rpmbuild/RPMS/`.
@@ -61,7 +61,7 @@ Install Go. For details about how to install golang, refer to https://golang.org
 
 ### Start/Stop/Restart
 
-Enter the directory `/opt/db-monitor/`, and run the following commands to start/stop/restart db-monitor.
+Enter the directory `/opt/db-monitor/`, and run the following commands to start/stop/restart PolarDB-NodeAgent.
 
 ```
 # Start
