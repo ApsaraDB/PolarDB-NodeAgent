@@ -1,8 +1,8 @@
 # 快速入门
 
-本文档介绍了如何安装和运行db-monitor，并查看采集到的监控数据。
+本文档介绍了如何安装和运行PolarDB-NodeAgent，并查看采集到的监控数据。
 
-对于PolarDB-for-PostgreSQL, db-monitor默认把将监控数据写回数据库, 并在数据库内提供视图以供查询, 也可通过配置将监控数据推送给prometheus pushgateway, 具体配置可见[配置文档](configuration.md).
+对于PolarDB-for-PostgreSQL, PolarDB-NodeAgent默认把将监控数据写回数据库, 并在数据库内提供视图以供查询, 也可通过配置将监控数据推送给prometheus pushgateway, 具体配置可见[配置文档](configuration.md).
 此外, 对于监控数据存入数据库的场景, 还配有grafana dashboard方便展示.
 
 ## 安装
@@ -46,7 +46,7 @@
 1. 源码下载
 
    ```
-   git clone git@github.com:ApsaraDB/db-monitor.git
+   git clone git@github.com:ApsaraDB/PolarDB-NodeAgent.git
    ```
 
 2. 在源码目录下进入到 `rpm` 子目录，构建RPM包, 完成后RPM包在`$HOME/rpmbuild/RPMS/`路径下。
