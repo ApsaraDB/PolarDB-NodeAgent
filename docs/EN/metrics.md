@@ -2,7 +2,7 @@
 
 # Metric Introduction
 
-db-monitor stores the collected information in database tables, including information of wait events, IO calls and latency distribution, resource usage of each backend processes, etc. Each type of information is stored in one table, the columns of which include Dimension and Metric.
+PolarDB-NodeAgent stores the collected information in database tables, including information of wait events, IO calls and latency distribution, resource usage of each backend processes, etc. Each type of information is stored in one table, the columns of which include Dimension and Metric.
 
 
 ## dbmetrics
