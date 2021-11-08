@@ -29,8 +29,8 @@ import (
 	"reflect"
 
 	_ "github.com/lib/pq"
-	"github.com/ApsaraDB/db-monitor/common/log"
-	"github.com/ApsaraDB/db-monitor/plugins/polardb_pg_multidimension/collector"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/plugins/polardb_pg_multidimension/collector"
 )
 
 func PluginInit(ctx interface{}) (interface{}, error) {

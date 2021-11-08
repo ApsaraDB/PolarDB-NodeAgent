@@ -31,11 +31,11 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-	"github.com/ApsaraDB/db-monitor/internal/gather"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/internal/gather"
 
-	"github.com/ApsaraDB/db-monitor/common/consts"
-	"github.com/ApsaraDB/db-monitor/common/log"
-	"github.com/ApsaraDB/db-monitor/common/polardb_pg/meta"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/meta"
 )
 
 type PolarDBPGConfig struct {

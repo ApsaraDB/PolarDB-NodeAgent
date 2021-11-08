@@ -34,7 +34,7 @@ import (
 
 	"github.com/drone/routes"
 	"github.com/pkg/errors"
-	"github.com/ApsaraDB/db-monitor/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
 )
 
 const (

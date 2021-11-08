@@ -33,10 +33,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ApsaraDB/db-monitor/common/consts"
-	"github.com/ApsaraDB/db-monitor/common/log"
-	"github.com/ApsaraDB/db-monitor/common/polardb_pg/logger"
-	"github.com/ApsaraDB/db-monitor/common/utils"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/logger"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/utils"
 
 	_ "github.com/lib/pq"
 )

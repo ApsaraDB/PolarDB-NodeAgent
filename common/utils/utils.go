@@ -29,7 +29,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/ApsaraDB/db-monitor/common/consts"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
 	"io"
 	"io/ioutil"
 	"net"

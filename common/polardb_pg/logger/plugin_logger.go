@@ -26,7 +26,7 @@ package logger
 import (
 	"fmt"
 
-	"github.com/ApsaraDB/db-monitor/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
 )
 
 type PluginLogger struct {

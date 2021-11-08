@@ -26,7 +26,7 @@ package collector
 import (
 	"bytes"
 	"fmt"
-	"github.com/ApsaraDB/db-monitor/common/consts"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
 	"io/ioutil"
 	"os"
 	"path/filepath"

@@ -18,9 +18,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ApsaraDB/db-monitor/common/consts"
-	"github.com/ApsaraDB/db-monitor/common/log"
-	"github.com/ApsaraDB/db-monitor/common/utils"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/utils"
 )
 
 var gRunnerInstanceIdx int32

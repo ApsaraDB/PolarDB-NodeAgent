@@ -30,7 +30,7 @@ import (
 
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 	
-	"github.com/ApsaraDB/db-monitor/common/utils"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/utils"
 )
 
 type DataLogger struct {

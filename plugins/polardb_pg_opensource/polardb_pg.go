@@ -26,11 +26,11 @@ package main
 import (
 	"errors"
 
-	"github.com/ApsaraDB/db-monitor/plugins/polardb_pg_opensource/service"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/plugins/polardb_pg_opensource/service"
 
 	_ "github.com/lib/pq"
-	"github.com/ApsaraDB/db-monitor/common/log"
-	pg "github.com/ApsaraDB/db-monitor/plugins/polardb_pg_opensource/collector"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	pg "github.com/ApsaraDB/PolarDB-NodeAgent/plugins/polardb_pg_opensource/collector"
 )
 
 func PluginInit(ctx interface{}) (interface{}, error) {

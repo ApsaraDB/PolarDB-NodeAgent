@@ -29,8 +29,8 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/ApsaraDB/db-monitor/common/consts"
-	"github.com/ApsaraDB/db-monitor/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
 )
 
 var g_HostIP string

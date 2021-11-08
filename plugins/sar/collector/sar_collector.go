@@ -37,9 +37,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/ApsaraDB/db-monitor/common/consts"
-	"github.com/ApsaraDB/db-monitor/common/log"
-	"github.com/ApsaraDB/db-monitor/common/system"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/system"
 )
 
 const (

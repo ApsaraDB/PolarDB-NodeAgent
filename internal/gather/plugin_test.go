@@ -30,7 +30,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ApsaraDB/db-monitor/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
 
 	"github.com/stretchr/testify/assert"
 )

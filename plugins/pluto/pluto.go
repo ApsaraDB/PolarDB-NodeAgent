@@ -32,9 +32,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ApsaraDB/db-monitor/common/system"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/system"
 
-	"github.com/ApsaraDB/db-monitor/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
 )
 
 type Pluto struct {

@@ -28,8 +28,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ApsaraDB/db-monitor/common/log"
-	"github.com/ApsaraDB/db-monitor/plugins/sar/collector"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/plugins/sar/collector"
 )
 
 // PluginInit init the plugin

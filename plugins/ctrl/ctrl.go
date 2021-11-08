@@ -27,7 +27,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/ApsaraDB/db-monitor/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
 )
 
 func PluginInit(ctx interface{}) (interface{}, error) {

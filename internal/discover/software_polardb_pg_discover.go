@@ -37,7 +37,7 @@ import (
 
 	_ "github.com/lib/pq"
 
-	"github.com/ApsaraDB/db-monitor/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
 )
 
 const DBConnTimeout = 1

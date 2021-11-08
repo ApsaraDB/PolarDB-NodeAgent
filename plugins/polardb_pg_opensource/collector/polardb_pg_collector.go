@@ -40,14 +40,14 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/ApsaraDB/db-monitor/common/cgroup"
-	"github.com/ApsaraDB/db-monitor/common/consts"
-	"github.com/ApsaraDB/db-monitor/common/log"
-	"github.com/ApsaraDB/db-monitor/common/polardb_pg/db_config"
-	"github.com/ApsaraDB/db-monitor/common/polardb_pg/logger"
-	"github.com/ApsaraDB/db-monitor/common/polardb_pg/meta"
-	"github.com/ApsaraDB/db-monitor/common/system"
-	"github.com/ApsaraDB/db-monitor/common/utils"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/cgroup"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/db_config"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/logger"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/meta"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/system"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/utils"
 
 	_ "github.com/lib/pq"
 )

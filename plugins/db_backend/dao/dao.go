@@ -38,9 +38,9 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/ApsaraDB/db-monitor/common/log"
-	"github.com/ApsaraDB/db-monitor/common/polardb_pg/db_config"
-	"github.com/ApsaraDB/db-monitor/common/polardb_pg/logger"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/db_config"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/logger"
 )
 
 const DATAMODEL_CONFIG_TABLE = "meta_data_model_config"

@@ -1,4 +1,4 @@
-module github.com/ApsaraDB/db-monitor
+module github.com/ApsaraDB/PolarDB-NodeAgent
 
 go 1.17
 

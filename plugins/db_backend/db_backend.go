@@ -34,13 +34,13 @@ import (
 	"sync"
 
 	"github.com/pkg/errors"
-	"github.com/ApsaraDB/db-monitor/common/consts"
-	"github.com/ApsaraDB/db-monitor/common/log"
-	"github.com/ApsaraDB/db-monitor/common/polardb_pg/control_service"
-	"github.com/ApsaraDB/db-monitor/common/polardb_pg/db_config"
-	"github.com/ApsaraDB/db-monitor/common/polardb_pg/meta"
-	"github.com/ApsaraDB/db-monitor/common/utils"
-	"github.com/ApsaraDB/db-monitor/plugins/db_backend/dao"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/control_service"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/db_config"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/meta"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/utils"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/plugins/db_backend/dao"
 )
 
 const (

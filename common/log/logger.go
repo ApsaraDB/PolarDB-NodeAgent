@@ -34,7 +34,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 
-        "github.com/ApsaraDB/db-monitor/common/utils"
+        "github.com/ApsaraDB/PolarDB-NodeAgent/common/utils"
 )
 
 const (

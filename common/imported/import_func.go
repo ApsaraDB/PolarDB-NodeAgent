@@ -26,7 +26,7 @@ package imported
 import (
 	"errors"
 
-	"github.com/ApsaraDB/db-monitor/common/consts"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
 )
 
 type PlutoCollector struct {

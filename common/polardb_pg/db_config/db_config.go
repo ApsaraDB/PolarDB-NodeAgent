@@ -33,8 +33,8 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/ApsaraDB/db-monitor/common/log"
-	"github.com/ApsaraDB/db-monitor/common/polardb_pg/logger"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/logger"
 )
 
 const DATAMODEL = "dbmetrics"

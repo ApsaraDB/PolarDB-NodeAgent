@@ -35,7 +35,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ApsaraDB/db-monitor/internal/gather"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/internal/gather"
 )
 
 type schemaDecode struct {

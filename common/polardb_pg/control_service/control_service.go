@@ -32,10 +32,10 @@ import (
 	sync "sync"
 	"time"
 
-	"github.com/ApsaraDB/db-monitor/common/log"
-	"github.com/ApsaraDB/db-monitor/common/polardb_pg/control_service/polardb"
-	"github.com/ApsaraDB/db-monitor/common/polardb_pg/meta"
-	"github.com/ApsaraDB/db-monitor/plugins/db_backend/dao"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/control_service/polardb"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/meta"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/plugins/db_backend/dao"
 	grpc "google.golang.org/grpc"
 	"gopkg.in/yaml.v2"
 )
