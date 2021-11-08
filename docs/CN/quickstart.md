@@ -16,7 +16,7 @@
 1. 源码下载
 
    ```
-   git clone git@github.com:ApsaraDB/db-monitor.git
+   git clone git@github.com:ApsaraDB/PolarDB-NodeAgent.git
    ```
 
 2. 编译
