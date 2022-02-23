@@ -7,7 +7,7 @@ APP_BIN := ${APP_ROOT}"/bin"
 APP_LIB := ${APP_ROOT}"lib"
 APP_CONF := ${APP_ROOT}"/conf"
 APP_LOG := ${APP_ROOT}"/log"
-SRC_CONF := "conf/"
+SRC_CONF := "conf_envs/conf_opensource_host_env"
 SRC_SCRIPTS := "scripts/"
 
 TOPTARGETS := all clean
