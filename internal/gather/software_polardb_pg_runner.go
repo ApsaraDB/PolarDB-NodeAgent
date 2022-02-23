@@ -25,7 +25,6 @@ package gather
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
 	"sync"
 	"time"
@@ -33,36 +32,19 @@ import (
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/internal/discover"
-
-	"gopkg.in/yaml.v2"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/config"
 )
 
 const (
 	MonitorConfPath = "conf/monitor.yaml"
 )
 
-type MonitorConf struct {
-	Collector struct {
-		Database struct {
-			Socketpath string `yaml:"socketpath"`
-			Username   string `yaml:"username"`
-			Database   string `yaml:"database"`
-		} `yaml:"database"`
-		ClusterManager struct {
-			LogPath string `yaml:"logpath"`
-		} `yaml:"clustermanager"`
-	} `yaml:"collector"`
-	Service struct {
-		Netdev string `yaml:"netdev"`
-		Port   int    `yaml:"port"`
-	} `yaml:"service"`
-}
-
 // SoftwarePolardbRunner struct
 type SoftwarePolardbRunner struct {
 	Runner
 	discoverer  *discover.SoftwarePolardbDiscoverer
-	monitorConf *MonitorConf
+	monitorConf *config.MonitorConf
+	addr        *net.IPNet
 }
 
 // NewSoftwarePolardbRunner new a SoftwarePolardbRunner object
@@ -70,6 +52,53 @@ func NewSoftwarePolardbRunner() RunnerService {
 	privateCloudRunner := &SoftwarePolardbRunner{}
 
 	return privateCloudRunner
+}
+
+func (rr *SoftwarePolardbRunner) initAddr() error {
+	var loopback *net.IPNet
+	loopback = nil
+
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return err
+	}
+
+	cidr, err := config.GetDatabaseCIDR()
+	if err != nil {
+		log.Warn("[software_polardb_runner] no ip addr resolved",
+			log.String("err", err.Error()))
+	}
+
+	for _, address := range addrs {
+		// check the address type and if it is not a loopback the display it
+		if ipnet, ok := address.(*net.IPNet); ok {
+			if cidr == nil {
+				if ipnet.IP.IsLoopback() {
+					loopback = ipnet
+					continue
+				}
+				if ipnet.IP.To4() != nil {
+					rr.addr = ipnet
+					return nil
+				}
+			} else {
+				if err == nil && cidr.Contains(ipnet.IP) {
+					rr.addr = ipnet
+					return nil
+				} else {
+					rr.addr = ipnet
+					return nil
+				}
+			}
+		}
+	}
+
+	if loopback != nil {
+		rr.addr = loopback
+		return nil
+	}
+
+	return fmt.Errorf("no ip addr match cidr: %s", cidr.String())
 }
 
 // RunnerInit init this runner
@@ -82,22 +111,35 @@ func (rr *SoftwarePolardbRunner) RunnerInit(mInfos *sync.Map, pInfo *PluginInfo,
 		return err
 	}
 
-	confstr, err := ioutil.ReadFile(MonitorConfPath)
+	// 	confstr, err := ioutil.ReadFile(MonitorConfPath)
+	// 	if err != nil {
+	// 		log.Error("[software_polardb_runner] read software version conf file failed",
+	// 			log.String("error", err.Error()))
+	// 		return err
+	// 	}
+	//
+	// 	log.Info("[software_polardb_runner] read conf result", log.String("conf", string(confstr)))
+	//
+	// 	rr.monitorConf = &MonitorConf{}
+	// 	err = yaml.Unmarshal(confstr, rr.monitorConf)
+	// 	if err != nil {
+	// 		log.Error("[software_polardb_runner] yaml unmarshal conf file failed",
+	// 			log.String("error", err.Error()), log.String("conf", string(confstr)))
+	// 		return err
+	// 	}
+	err = rr.initAddr()
 	if err != nil {
-		log.Error("[software_polardb_runner] read software version conf file failed",
-			log.String("error", err.Error()))
+		log.Error("[software_polardb_runner] cidr addr init failed", log.String("error", err.Error()))
 		return err
 	}
 
-	log.Info("[software_polardb_runner] read conf result", log.String("conf", string(confstr)))
-
-	rr.monitorConf = &MonitorConf{}
-	err = yaml.Unmarshal(confstr, rr.monitorConf)
+	rr.monitorConf, err = config.GetMonitorConf()
 	if err != nil {
-		log.Error("[software_polardb_runner] yaml unmarshal conf file failed",
-			log.String("error", err.Error()), log.String("conf", string(confstr)))
+		log.Error("[software_polardb_runner] conf init failed", log.String("error", err.Error()))
 		return err
 	}
+
+	log.Info("[software_polardb_runner] init ip", log.String("ip", rr.addr.IP.String()))
 
 	rr.discoverer = &discover.SoftwarePolardbDiscoverer{
 		WorkDir:         rr.monitorConf.Collector.Database.Socketpath,
@@ -314,17 +356,5 @@ func (rr *SoftwarePolardbRunner) runSingleSoftwarePolardbRunner(ins *Instance, w
 }
 
 func (rr *SoftwarePolardbRunner) getHostIP() string {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return ""
-	}
-	for _, address := range addrs {
-		// check the address type and if it is not a loopback the display it
-		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-			if ipnet.IP.To4() != nil {
-				return ipnet.IP.String()
-			}
-		}
-	}
-	return ""
+	return rr.addr.IP.String()
 }

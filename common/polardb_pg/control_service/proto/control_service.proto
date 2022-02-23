@@ -22,6 +22,7 @@ message SyncInstanceResponse {
   // 返回码
   int32 code = 1;
   string msg = 2;
+  string version = 3;
 }
 
 service ControlService {

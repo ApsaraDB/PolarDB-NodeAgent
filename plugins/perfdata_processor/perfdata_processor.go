@@ -255,6 +255,14 @@ func rebuildMaxscale(in map[string]interface{},
 	results := make([]map[string]interface{}, 0)
 	metricmap := make(map[string]interface{})
 	results = append(results, metricmap)
+	itemmap := make(map[string]int)
+
+	// to keep either delta value or instant value in the result
+	for _, item := range schema.Metrics.SchemaItems {
+		if item.ValueType == gather.ListType {
+			itemmap[item.Name] = 1
+		}
+	}
 
 	for _, item := range schema.Metrics.SchemaItems {
 		if item.ValueType == gather.IntType {
@@ -293,11 +301,32 @@ func rebuildMaxscale(in map[string]interface{},
 
 			if strings.HasSuffix(item.Name, "_delta") {
 				for i, valuestr := range strings.Split(in[item.Name].(string), ",") {
+					if i >= len(results) {
+						log.Debug("[perfdata_processor] convert maxscale list not match",
+							log.String("name", item.Name))
+						break
+					}
 					results[i][item.Name], err = strconv.ParseUint(valuestr, 10, 64)
-					if err != nil {
+					if err != nil && valuestr != "" {
 						log.Warn("[perfdata_processor] convert maxscale list type value failed",
 							log.String("name", item.Name),
 							log.String("value", in[item.Name].(string)))
+					}
+				}
+			} else {
+				if _, ok := itemmap[item.Name+"_delta"]; !ok {
+					for i, valuestr := range strings.Split(in[item.Name].(string), ",") {
+						if i >= len(results) {
+							log.Debug("[perfdata_processor] convert maxscale list not match",
+								log.String("name", item.Name))
+							break
+						}
+						results[i][item.Name], err = strconv.ParseUint(valuestr, 10, 64)
+						if err != nil && valuestr != "" {
+							log.Warn("[perfdata_processor] convert maxscale list type value failed",
+								log.String("name", item.Name),
+								log.String("value", in[item.Name].(string)))
+						}
 					}
 				}
 			}
@@ -314,7 +343,7 @@ func rebuildSarMap(param map[string]interface{},
 	schema *gather.BusinessSchema,
 	m map[string]interface{}) map[string]interface{} {
 
-	sarconfig := &SarConfig{}
+	sarconfig := &SarConfig{EnableCPUPerCore: true}
 	if config != nil {
 		err := json.Unmarshal(config.(json.RawMessage), sarconfig)
 		if err != nil {
@@ -373,11 +402,11 @@ func rebuildSarMap(param map[string]interface{},
 		"nic_list":          "netdev",
 	}
 
-	listdimmap := map[string]string{
-		"cpu_list":          "dim_cpu",
-		"disk_list":         "dim_disk",
-		"fs_partition_list": "dim_fs",
-		"nic_list":          "dim_dev",
+	listdimmap := map[string][]string{
+		"cpu_list":          []string{"dim_cpu"},
+		"disk_list":         []string{"dim_disk"},
+		"fs_partition_list": []string{"dim_partition", "dim_fs"},
+		"nic_list":          []string{"dim_dev"},
 	}
 
 	mapkey := map[string][]string{
@@ -434,6 +463,25 @@ func rebuildSarMap(param map[string]interface{},
 			"tcp_tw",
 			"tcp_alloc",
 			"tcp_mem"},
+		"snmpstat": []string{
+			"AttemptFails_delta",
+			"CurrEstab",
+			"EstabResets_delta",
+			"InErrs_delta",
+			"InSegs_delta",
+			"MaxConn",
+			"OutRsts_delta",
+			"OutSegs_delta",
+			"PassiveOpens_delta",
+			"RetransSegs_delta",
+		},
+		"netstat": []string{
+			"ListenOverflows_delta",
+			"ListenDrops_delta",
+			"TWRecycled_delta",
+			"TCPFastRetrans_delta",
+			"TCPForwardRetrans_delta",
+		},
 	}
 
 	out := map[string]interface{}{
@@ -445,6 +493,9 @@ func rebuildSarMap(param map[string]interface{},
 		"disk":       make([]map[string]interface{}, 0),
 		"procs":      make([]map[string]interface{}, 0),
 		"fs":         make([]map[string]interface{}, 0),
+		"snmpstat":   make([]map[string]interface{}, 0),
+		"netstat":    make([]map[string]interface{}, 0),
+		// "sysinfo":    make([]map[string]interface{}, 0, 1),
 	}
 
 	var err error
@@ -456,7 +507,13 @@ func rebuildSarMap(param map[string]interface{},
 				k := strings.ToLower(key)
 				k = strings.Replace(k, "(", "_", -1)
 				k = strings.Replace(k, ")", "", -1)
-				modelmap[k] = res
+				if x, err := strconv.ParseFloat(res.(string), 64); err == nil {
+					modelmap[k] = x
+				} else {
+					log.Warn("[perfdata_processor] parse single value failed",
+						log.String("key", key),
+						log.String("res", res.(string)))
+				}
 			}
 		}
 
@@ -469,14 +526,29 @@ func rebuildSarMap(param map[string]interface{},
 		result := make([]map[string]interface{}, 0)
 
 		for i, item := range dimlist {
-			if datamodelkey == "cpu_list" && !sarconfig.EnableCPUPerCore {
-				if item != "cpu" {
-					continue
+			if datamodelkey == "cpu_list" {
+				// if item == "cpu" {
+				// 	out["sysinfo"].([]map[string]interface{})[0]["cpucores"] = len(dimlist) - 1
+				// }
+
+				if !sarconfig.EnableCPUPerCore {
+					if item != "cpu" {
+						continue
+					}
 				}
 			}
 
 			m := make(map[string]interface{})
-			m[listdimmap[datamodelkey]] = item
+			for j, itemj := range strings.Split(item, "|||") {
+				if j >= len(listdimmap[datamodelkey]) {
+					log.Warn("[perfdata_processor] parse multi key failed",
+						log.String("key", item),
+						log.String("map list", fmt.Sprintf("%+v", listdimmap[datamodelkey])))
+					continue
+				}
+				// log.Info("split it", log.String("item", fmt.Sprintf("%+v", item)), log.String("key", listdimmap[datamodelkey][j]))
+				m[listdimmap[datamodelkey][j]] = itemj
+			}
 
 			indexlist = append(indexlist, i)
 			result = append(result, m)
@@ -492,7 +564,7 @@ func rebuildSarMap(param map[string]interface{},
 			for _, i := range indexlist {
 				result[index][key], err = strconv.ParseFloat(itemlist[i], 64)
 				if err != nil {
-					log.Warn("parse list error",
+					log.Warn("[perfdata_processor] parse list error",
 						log.String("key", key), log.String("res", itemlist[i]))
 				}
 				index += 1

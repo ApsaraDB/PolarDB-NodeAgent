@@ -26,6 +26,7 @@ package collector
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -123,7 +124,22 @@ func New() *SarCollector {
 // Init sar
 func (sc *SarCollector) Init(m map[string]interface{}) error {
 	sc.isOnEcs = m["is_on_ecs"].(bool)
-	sc.enableProcessTop = m["enable_process_top"].(bool)
+	if _, ok := m["enable_process_top"]; ok {
+		sc.enableProcessTop = m["enable_process_top"].(bool)
+	} else {
+		sc.enableProcessTop = false
+	}
+
+	blockDeviceTypeMap := make(map[string]bool)
+	if _, ok := m["block_device_type"]; ok {
+		for _, dtype := range m["block_device_type"].([]interface{}) {
+			blockDeviceTypeMap[dtype.(string)] = true
+		}
+	} else {
+		blockDeviceTypeMap["all"] = true
+	}
+	sc.disk.blockDeviceTypeMap = blockDeviceTypeMap
+	log.Info("[sar_collector] block device type map", log.String("map", fmt.Sprintf("%+v", blockDeviceTypeMap)))
 
 	gMonitors = make(map[string]bool, 64)
 	monitors, ok := m["monitors"].([]interface{})
@@ -1016,15 +1032,18 @@ func (l *loadAvg) stop() {
 }
 
 type diskStat struct {
-	first             bool
-	currentStat       []uint64
-	metricSet         []string
-	diskList          []string
-	preStat           map[string][]uint64
-	deltaStat         map[string][]uint64
-	originValueOutput map[string][]uint64
-	deltaValueOutput  map[string][]uint64
-	file              *os.File
+	first              bool
+	currentStat        []uint64
+	metricSet          []string
+	diskList           []string
+	preStat            map[string][]uint64
+	deltaStat          map[string][]uint64
+	originValueOutput  map[string][]uint64
+	deltaValueOutput   map[string][]uint64
+	blockDeviceTypeMap map[string]bool
+	blockDeviceNumMap  map[int]bool
+	deviceFile         *os.File
+	file               *os.File
 }
 
 var filterMajorDisk = map[string]bool{
@@ -1043,6 +1062,8 @@ func diskStatNew() *diskStat {
 	d.deltaStat = make(map[string][]uint64)
 	d.originValueOutput = make(map[string][]uint64)
 	d.deltaValueOutput = make(map[string][]uint64)
+	d.blockDeviceTypeMap = make(map[string]bool)
+	d.blockDeviceNumMap = make(map[int]bool)
 	d.currentStat = make([]uint64, consts.DiskIostatColNum)
 	return d
 }
@@ -1054,6 +1075,62 @@ func (d *diskStat) collect(out map[string]interface{}, buf []byte, buf2 *bytes.B
 		if err != nil {
 			return err
 		}
+	}
+
+	if d.deviceFile == nil {
+		tmpbuf := make([]byte, 256*1024)
+		d.deviceFile, err = os.Open(consts.ProcDevice)
+		if err != nil {
+			return err
+		}
+
+		num, err := d.deviceFile.ReadAt(tmpbuf, 0)
+		if err != nil && err != io.EOF {
+			return err
+		}
+
+		tmpbuf = tmpbuf[:num]
+		isBlockDeviceBegin := false
+
+		for {
+			index := bytes.IndexRune(tmpbuf, '\n')
+			if index < 0 {
+				break
+			}
+
+			if !isBlockDeviceBegin {
+				if bytes.HasPrefix(tmpbuf[:index], []byte("Block devices:")) {
+					isBlockDeviceBegin = true
+				}
+
+				tmpbuf = tmpbuf[index+1:]
+				continue
+			} else {
+				fields := bytes.Fields(tmpbuf[:index])
+				tmpbuf = tmpbuf[index+1:]
+				if len(fields) != 2 {
+					log.Warn("[sar_collector] block device fields failed", log.Int("len", len(fields)))
+					continue
+				}
+
+				x, err := strconv.Atoi(string(fields[0]))
+				if err != nil {
+					log.Warn("[sar_collector] convert block num field error",
+						log.String("block num", string(fields[0])), log.String("error", err.Error()))
+					continue
+				}
+
+				if _, ok := d.blockDeviceTypeMap["all"]; ok {
+					d.blockDeviceNumMap[x] = true
+					continue
+				}
+
+				if _, ok := d.blockDeviceTypeMap[string(fields[1])]; ok {
+					d.blockDeviceNumMap[x] = true
+				}
+			}
+		}
+		log.Info("[sar_collector] block device num map", log.String("map", fmt.Sprintf("%+v", d.blockDeviceNumMap)))
 	}
 
 	num, err := d.file.ReadAt(buf, 0)
@@ -1073,6 +1150,17 @@ func (d *diskStat) collect(out map[string]interface{}, buf []byte, buf2 *bytes.B
 		buf = buf[index+1:]
 
 		if len(fields) < 14 {
+			continue
+		}
+
+		x, err := strconv.Atoi(string(fields[0]))
+		if err != nil {
+			log.Warn("[sar_collector] convert block num field error",
+				log.String("block num", string(fields[0])), log.String("error", err.Error()))
+			continue
+		}
+
+		if _, ok := d.blockDeviceNumMap[x]; !ok {
 			continue
 		}
 
@@ -1711,6 +1799,7 @@ type netDevStat struct {
 	originValueOutput map[string][]uint64
 	deltaValueOutput  map[string][]uint64
 	file              *os.File
+	typeMap           map[string]string
 }
 
 func netDevStatNew() *netDevStat {
@@ -1725,6 +1814,7 @@ func netDevStatNew() *netDevStat {
 		originValueOutput: make(map[string][]uint64),
 		deltaValueOutput:  make(map[string][]uint64),
 		currentStat:       make([]uint64, consts.NetDevColNum),
+		typeMap:           make(map[string]string),
 	}
 }
 
@@ -1767,6 +1857,23 @@ func (n *netDevStat) collectNetDev(out map[string]interface{}, buf []byte, buf2 
 			return r == ':' || unicode.IsSpace(r)
 		})
 		buf = buf[index+1:]
+
+		if typestr, ok := n.typeMap[string(fields[0])]; ok {
+			if typestr != "physical" {
+				continue
+			}
+		} else {
+			if _, err := os.Stat(fmt.Sprintf("/sys/class/net/%s", string(fields[0]))); err == nil {
+				if _, err = os.Stat(fmt.Sprintf("/sys/class/net/%s/device", string(fields[0]))); err == nil {
+					n.typeMap[string(fields[0])] = "physical"
+				} else if errors.Is(err, os.ErrNotExist) {
+					n.typeMap[string(fields[0])] = "virtual"
+				}
+			}
+			log.Info("[sar_collector] find net dev",
+				log.String("type map", fmt.Sprintf("%+v", n.typeMap)),
+				log.String("dev", string(fields[0])))
+		}
 
 		for i, value := range fields[1:] {
 			n.currentStat[i], err = strconv.ParseUint(string(value), 10, 64)
@@ -1884,7 +1991,7 @@ func (v *vmStat) stop() {
 		v.file.Close()
 		v.file = nil
 	}
-	v.stat=nil
+	v.stat = nil
 }
 
 type vmStat struct {

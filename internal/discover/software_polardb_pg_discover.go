@@ -40,7 +40,7 @@ import (
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
 )
 
-const DBConnTimeout = 1
+const DBConnTimeout = 5
 const DBQueryTimeout = 5
 
 type InstanceInfo struct {
@@ -204,7 +204,7 @@ func (d *SoftwarePolardbDiscoverer) enumerateContainer() {
 		}
 
 		log.Info("[software_polardb_discoverer] start to look for new instance",
-				log.String("read dir", d.WorkDir))
+			log.String("read dir", d.WorkDir))
 
 		files, err := ioutil.ReadDir(d.WorkDir)
 		if err != nil {
@@ -227,15 +227,14 @@ func (d *SoftwarePolardbDiscoverer) enumerateContainer() {
 			var systemid int64
 			var err error
 
-			log.Info("[software_polardb_discoverer] find socket file",
+			log.Debug("[software_polardb_discoverer] find socket file",
 				log.String("file", f.Name()))
 
 			socketlist := strings.Split(f.Name(), ".")
 			port, err := strconv.ParseInt(socketlist[len(socketlist)-1], 10, 64)
 			if err != nil {
 				log.Warn("[software_polardb_discoverer] cannot get port from socket",
-					log.String("filename", f.Name()),
-					log.String("error", err.Error()))
+					log.String("filename", f.Name()))
 				continue
 			}
 

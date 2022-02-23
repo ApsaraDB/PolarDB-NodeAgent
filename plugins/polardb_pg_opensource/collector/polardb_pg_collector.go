@@ -32,11 +32,13 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -60,12 +62,13 @@ const (
 	CollectMaxDBVersion   = MaxDBVersion
 	DBConnTimeout         = 10
 	DBQueryTimeout        = 60
+	CollectTotalTimeout   = 5
 	plutoPluginIdentifier = "golang-collector-pluto"
 
 	DefaultLocalDiskCollectInterval = 15
 	DefaultPFSCollectInterval       = 1
 	DBConfigCheckVersionInterval    = 5
-	DefaultLCMForAllIntervals       = 30
+	DefaultLCMForAllIntervals       = 60
 
 	basePath    = "base_path"
 	rwoDataPath = "rwo_data_path"
@@ -77,6 +80,10 @@ const (
 	cpuCfsPeriodUs = "cpu.cfs_period_us"
 
 	KEY_SEND_TO_MULTIBACKEND = "send_to_multibackend"
+	MIN_TRACKLOG_TIME        = 500
+
+	DB_STAT_ROUTINE_KEY       = "dbstat"
+	RESOURCE_STAT_ROUTINE_KEY = "resource"
 )
 
 const (
@@ -85,6 +92,7 @@ const (
 	RO      = 2
 	StandBy = 3
 	DataMax = 4
+	User    = 5
 )
 
 var DefaultCollectCycle int64
@@ -119,20 +127,19 @@ type CollectorInfo struct {
 
 	localDiskCollectInterval int64
 
-	timeoutThresholdMs int64
-
-	timeNow                time.Time
-	count                  int64
-	enablePFS              bool
-	enableLocalDisk        bool
-	enableHugePage         bool
-	enableDBConfig         bool
-	enableDBConfigCenter   bool
-	dbConfigCenterHost     string
-	dbConfigCenterPort     int
-	dbConfigCenterUser     string
-	dbConfigCenterPass     string
-	dbConfigCenterDatabase string
+	timeNow                   time.Time
+	count                     int64
+	enablePFS                 bool
+	enableLocalDisk           bool
+	enableHugePage            bool
+	enableDBConfig            bool
+	enableDBConfigReleaseDate string
+	enableDBConfigCenter      bool
+	dbConfigCenterHost        string
+	dbConfigCenterPort        int
+	dbConfigCenterUser        string
+	dbConfigCenterPass        string
+	dbConfigCenterDatabase    string
 
 	dbConfigVersion       int64
 	dbConfigCenterVersion int64
@@ -143,6 +150,8 @@ type CollectorInfo struct {
 	dbNeedSnapshot     bool
 	localDiskPath      string
 	useFullOutdict     bool
+
+	slowCollectionLogThreshold int64
 
 	cacheout map[string]interface{}
 }
@@ -155,7 +164,7 @@ type ImportedCollector struct {
 
 type PreValue struct {
 	LastTime int64
-	Value    uint64
+	Value    float64
 }
 
 type PolarDBPgCollector struct {
@@ -167,6 +176,7 @@ type PolarDBPgCollector struct {
 	PhyInsId         int
 	HostInsId        int
 	HostInsIdStr     string
+	HostInsIdStrList []string
 	Role             string
 	PolarVersion     string
 	PolarReleaseDate string
@@ -177,7 +187,7 @@ type PolarDBPgCollector struct {
 	environment      string
 	isOnEcs          bool
 	buf              bytes.Buffer
-	rawPre           map[string]uint64 // raw value last time
+	rawPre           map[string]float64 // raw value last time
 	preValueMap      map[string]PreValue
 	cpumem           *cgroup.CPUMem
 	pfsdcpumem       *cgroup.CPUMem
@@ -186,8 +196,11 @@ type PolarDBPgCollector struct {
 	podCpuacct       *cgroup.CPUMem
 	cgroupio         *cgroup.Io
 
-	pfsdCpumem        *cgroup.CPUMem
-	pfsdPodCpumem     *cgroup.CPUMem
+	pfsdToolCpumem *cgroup.CPUMem
+	managerCpumem  *cgroup.CPUMem
+	pauseCpumem    *cgroup.CPUMem
+	podCpumem      *cgroup.CPUMem
+
 	importedCollector *ImportedCollector
 
 	dbInfo  *DBInfo
@@ -211,6 +224,10 @@ type PolarDBPgCollector struct {
 	configCollectQueryContext      []interface{}
 	configCollectInitContext       []interface{}
 	configCollectConfigInitContext []interface{}
+
+	mutex                        *sync.Mutex
+	asyncCollectionRunChannel    map[string]chan int
+	asyncCollectionResultChannel map[string]chan error
 }
 
 func New() *PolarDBPgCollector {
@@ -224,10 +241,23 @@ func New() *PolarDBPgCollector {
 	c.podmem = cgroup.New(&c.buf)
 	c.cpuacct = cgroup.New(&c.buf)
 	c.podCpuacct = cgroup.New(&c.buf)
+	c.mutex = &sync.Mutex{}
+	c.asyncCollectionRunChannel = make(map[string]chan int)
+	c.asyncCollectionResultChannel = make(map[string]chan error)
+	c.asyncCollectionRunChannel[RESOURCE_STAT_ROUTINE_KEY] = make(chan int, 1)
+	c.asyncCollectionRunChannel[DB_STAT_ROUTINE_KEY] = make(chan int, 1)
+	c.asyncCollectionResultChannel[RESOURCE_STAT_ROUTINE_KEY] = make(chan error, 1)
+	c.asyncCollectionResultChannel[DB_STAT_ROUTINE_KEY] = make(chan error, 1)
 
 	c.cgroupio = cgroup.NewIo(&c.buf)
-	c.pfsdCpumem = cgroup.New(&c.buf)
-	c.pfsdPodCpumem = cgroup.New(&c.buf)
+	// c.pfsdCpumem = cgroup.New(&c.buf)
+	// c.pfsdPodCpumem = cgroup.New(&c.buf)
+
+	// c.pfsdCpumem = cgroup.New(&c.buf)
+	c.pfsdToolCpumem = cgroup.New(&c.buf)
+	c.managerCpumem = cgroup.New(&c.buf)
+	c.pauseCpumem = cgroup.New(&c.buf)
+	c.podCpumem = cgroup.New(&c.buf)
 
 	c.pfsCollector = NewPfsCollector()
 	c.logger = logger.NewPluginLogger("polardb_pg", nil)
@@ -281,6 +311,26 @@ func (c *PolarDBPgCollector) initEndpoint(m map[string]interface{}, envs map[str
 	}
 }
 
+func (c *PolarDBPgCollector) initHostInsIdStrList() {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return
+	}
+
+	for _, address := range addrs {
+		// check the address type and if it is not a loopback the display it
+		if ipnet, ok := address.(*net.IPNet); ok {
+			if ipnet.IP.To4() != nil {
+				c.HostInsIdStrList = append(c.HostInsIdStrList,
+					fmt.Sprintf("%s:%d", ipnet.IP.String(), c.Port))
+			}
+		}
+	}
+
+	c.logger.Info("init endpoint list",
+		log.String("endpoint list", fmt.Sprintf("%+v", c.HostInsIdStrList)))
+}
+
 func (c *PolarDBPgCollector) initParams(m map[string]interface{}) error {
 	c.InsName = m[consts.PluginContextKeyInsName].(string)
 	c.Port = m[consts.PluginContextKeyPort].(int)
@@ -307,12 +357,14 @@ func (c *PolarDBPgCollector) initParams(m map[string]interface{}) error {
 	c.cInfo.interval = int64(m[consts.PluginIntervalKey].(int))
 	c.cInfo.enablePFS = m["enable_pfs"].(bool)
 	c.cInfo.enableDBConfig = c.GetMapValue(m, "enable_dbconfig", false).(bool)
+	c.cInfo.enableDBConfigReleaseDate = c.GetMapValue(m, "enable_dbconfig_releasedate", "20211230").(string)
 	c.cInfo.enableDBConfigCenter = c.GetMapValue(m, "enable_dbconfig_center", false).(bool)
 	c.cInfo.dbConfigCenterHost = c.GetMapValue(m, "dbconfig_center_host", "").(string)
 	c.cInfo.dbConfigCenterPort = int(c.GetMapValue(m, "dbconfig_center_port", float64(5432)).(float64))
 	c.cInfo.dbConfigCenterUser = c.GetMapValue(m, "dbconfig_center_user", "postgres").(string)
 	c.cInfo.dbConfigCenterPass = c.GetMapValue(m, "dbconfig_center_pass", "").(string)
 	c.cInfo.dbConfigCenterDatabase = c.GetMapValue(m, "dbconfig_center_database", "postgres").(string)
+	c.cInfo.slowCollectionLogThreshold = int64(c.GetMapValue(m, "slow_collection_log_thres", float64(MIN_TRACKLOG_TIME)).(float64))
 	c.cInfo.useFullOutdict = c.GetMapValue(m, "use_full_outdict", false).(bool)
 
 	c.cInfo.dbConfigSchema = c.GetMapValue(m, "dbconfig_schema", "polar_gawr_collection").(string)
@@ -325,6 +377,7 @@ func (c *PolarDBPgCollector) initParams(m map[string]interface{}) error {
 	}
 	c.isOnEcs = m["is_on_ecs"].(bool)
 
+	c.HostInsIdStrList = make([]string, 0)
 	c.Endpoint = c.initEndpoint(m, envs)
 	// need to simplify this logic
 	if _, ok := envs["apsara.metric.ins_name"]; ok {
@@ -343,8 +396,7 @@ func (c *PolarDBPgCollector) initParams(m map[string]interface{}) error {
 		}
 		c.logger.Info("endpoint", log.String("endpoint", c.Endpoint))
 	} else {
-		// rds pg
-		c.HostInsIdStr = envs["host_ins_id"]
+		c.initHostInsIdStrList()
 		c.InsId, _ = strconv.Atoi(m[consts.PluginContextKeyInsId].(string))
 		c.DataDir = c.getDataDir(m[basePath].(string), envs)
 		if c.environment == "software" {
@@ -371,8 +423,8 @@ func (c *PolarDBPgCollector) initParams(m map[string]interface{}) error {
 
 	// other init
 	DefaultCollectCycle = c.cInfo.cycle
-	c.rawPre = make(map[string]uint64, 256)
-	c.preValueMap = make(map[string]PreValue, 256)
+	c.rawPre = make(map[string]float64, 1024)
+	c.preValueMap = make(map[string]PreValue, 1024)
 
 	c.logger.Debug("init params done", log.String("c", fmt.Sprintf("%+v", c)))
 	return nil
@@ -492,6 +544,18 @@ func (c *PolarDBPgCollector) initCollectDB(m map[string]interface{}) error {
 		}
 		c.PolarReleaseDate = strconv.FormatInt(c.dbInfo.releaseDate, 10)
 
+		if c.PolarReleaseDate < c.cInfo.enableDBConfigReleaseDate {
+			c.logger.Info("db config is disabled for this release_date",
+				log.String("polar_release_date", c.PolarReleaseDate),
+				log.String("dbconfig_release_date", c.cInfo.enableDBConfigReleaseDate))
+			c.cInfo.enableDBConfig = false
+		}
+
+		if c.cInfo.enableDBConfig {
+			c.logger.Info("db config is enable for this release_date",
+				log.String("polar_release_date", c.PolarReleaseDate))
+		}
+
 		if c.dbInfo.polarVersion, err = c.getValueFromDB("SHOW polar_version"); err != nil {
 			c.logger.Warn("get polar version failed", err)
 		}
@@ -609,14 +673,14 @@ func (c *PolarDBPgCollector) initQueries(queryContexts []interface{}) error {
 		}
 
 		if queryCtx.Enable == 0 {
-			c.logger.Info("sql is disabled", log.String("query", queryCtx.Query))
+			c.logger.Info("sql is disabled", log.String("name", queryCtx.Name))
 		}
 
 		if queryCtx.MinVersion != MinDBVersion && c.dbInfo.version < queryCtx.MinVersion {
 			c.logger.Info("instance version is too low",
 				log.Int64("conf_version", queryCtx.MinVersion),
 				log.Int64("ins_version", c.dbInfo.version),
-				log.String("query", queryCtx.Query))
+				log.String("name", queryCtx.Name))
 			queryCtx.Enable = 0
 		}
 
@@ -624,7 +688,7 @@ func (c *PolarDBPgCollector) initQueries(queryContexts []interface{}) error {
 			c.logger.Info("instance version is high",
 				log.Int64("conf_version", queryCtx.MaxVersion),
 				log.Int64("ins_version", c.dbInfo.version),
-				log.String("query", queryCtx.Query))
+				log.String("name", queryCtx.Name))
 			queryCtx.Enable = 0
 		}
 
@@ -638,7 +702,7 @@ func (c *PolarDBPgCollector) initQueries(queryContexts []interface{}) error {
 				c.logger.Info("instance release date is older",
 					log.Int64("conf_release_date", queryCtx.PolarReleaseDate),
 					log.Int64("ins_release_date", c.dbInfo.releaseDate),
-					log.String("query", queryCtx.Query))
+					log.String("name", queryCtx.Name))
 				queryCtx.Enable = 0
 			}
 		}
@@ -648,12 +712,22 @@ func (c *PolarDBPgCollector) initQueries(queryContexts []interface{}) error {
 			queryCtx.Enable = 0
 		}
 
-		if queryCtx.DBRole != All && queryCtx.DBRole != c.dbInfo.role {
+		if queryCtx.DBRole != All && queryCtx.DBRole != User && queryCtx.DBRole != c.dbInfo.role {
 			c.logger.Info("conf dbrole is not match to instance dbrole",
 				log.Int("conf_role", int(queryCtx.DBRole)),
 				log.Int("ins_role", int(c.dbInfo.role)),
-				log.String("query", queryCtx.Query))
+				log.String("name", queryCtx.Name))
 			queryCtx.Enable = 0
+		}
+
+		if queryCtx.DBRole == User {
+			if !(c.dbInfo.role == RW || c.dbInfo.role == RO) {
+				c.logger.Info("db role is not RW or RO",
+					log.Int("conf_role", int(queryCtx.DBRole)),
+					log.Int("ins_role", int(c.dbInfo.role)),
+					log.String("name", queryCtx.Name))
+				queryCtx.Enable = 0
+			}
 		}
 
 		if queryCtx.Name == "Default" {
@@ -669,33 +743,35 @@ func (c *PolarDBPgCollector) initQueries(queryContexts []interface{}) error {
 
 	if c.cInfo.enableDBConfig {
 		var err error
-		if err = c.dbConfig.InitFromDBConfig(c.ConfigMap,
-			c.cInfo.querymap, c.dbInfo.role == RW); err != nil {
-			if c.dbInfo.role != RW {
-				c.cInfo.dbConfigVersion = -1
-				c.logger.Info("we may need to wait for RW init")
-			} else {
-				c.logger.Error("init from db config failed", err)
-				return err
-			}
-		}
-
-		if err == nil && c.dbInfo.role != DataMax {
-			if c.cInfo.dbConfigVersion, err = c.dbConfig.GetDBConfigVersion(); err != nil {
-				c.logger.Error("init from db config version failed", err)
-				return err
-			}
-
-			if c.cInfo.enableDBConfigCenter {
-				if c.cInfo.dbConfigCenterVersion, err =
-					c.dbConfig.GetConfigCenterDBConfigVersion(); err != nil {
-					c.logger.Warn("init from config center db config version failed", err)
+		if c.dbInfo.role != DataMax {
+			if err = c.dbConfig.InitFromDBConfig(c.ConfigMap,
+				c.cInfo.querymap, c.dbInfo.role == RW); err != nil {
+				if c.dbInfo.role != RW {
+					c.cInfo.dbConfigVersion = -1
+					c.logger.Info("we may need to wait for RW init")
+				} else {
+					c.logger.Error("init from db config failed", err)
+					return err
 				}
 			}
 
-			if c.cInfo.dbSnapshotNo, err = c.dbConfig.GetDBSnapshotNo(); err != nil {
-				c.logger.Error("init db snapshot no failed", err)
-				return err
+			if err == nil {
+				if c.cInfo.dbConfigVersion, err = c.dbConfig.GetDBConfigVersion(); err != nil {
+					c.logger.Error("init from db config version failed", err)
+					return err
+				}
+
+				if c.cInfo.enableDBConfigCenter {
+					if c.cInfo.dbConfigCenterVersion, err =
+						c.dbConfig.GetConfigCenterDBConfigVersion(); err != nil {
+						c.logger.Warn("init from config center db config version failed", err)
+					}
+				}
+
+				if c.cInfo.dbSnapshotNo, err = c.dbConfig.GetDBSnapshotNo(); err != nil {
+					c.logger.Error("init db snapshot no failed", err)
+					return err
+				}
 			}
 		}
 
@@ -765,9 +841,9 @@ func (c *PolarDBPgCollector) initCgroupCollector(m map[string]interface{}) error
 	if c.environment != "software" {
 		c.podCpuacct.InitCpu(filepath.Dir(envs["cgroup_cpu_path"]))
 
-		c.pfsdCpumem.InitCpu(envs["pfsd_cgroup_cpu_path"])
-		c.pfsdCpumem.InitMemory(envs["pfsd_cgroup_mem_path"])
-		c.pfsdPodCpumem.InitCpu(filepath.Dir(envs["pfsd_cgroup_cpu_path"]))
+		// c.pfsdCpumem.InitCpu(envs["pfsd_cgroup_cpu_path"])
+		// c.pfsdCpumem.InitMemory(envs["pfsd_cgroup_mem_path"])
+		// c.pfsdPodCpumem.InitCpu(filepath.Dir(envs["pfsd_cgroup_cpu_path"]))
 
 		c.logger.Info("podcpuset filepath",
 			log.String("cgroup_cpuset_path", filepath.Dir(envs["cgroup_cpuset_path"])),
@@ -782,15 +858,20 @@ func (c *PolarDBPgCollector) initCgroupCollector(m map[string]interface{}) error
 	}
 
 	if c.isPolarDB() {
-		c.pfsdcpumem.InitMemory(c.getContainerCgroupPath(envs[consts.CGroupMemPath], "pfsd", envs))
+		c.initCgroupCollectObj(c.pfsdcpumem, envs, "pfsd")
+		c.initCgroupCollectObj(c.pfsdToolCpumem, envs, "pfsd-tool")
+		c.initCgroupCollectObj(c.managerCpumem, envs, "manager")
+		c.initCgroupCollectObj(c.pauseCpumem, envs, "POD")
+
+		c.podCpumem.InitMemory(filepath.Dir(envs[consts.CGroupMemPath]))
 		if _, ok := envs[consts.CGroupCpuAcctPath]; ok {
-			c.pfsdcpumem.InitCpu(c.getContainerCgroupPath(envs[consts.CGroupCpuAcctPath], "pfsd", envs))
+			c.podCpumem.InitCpu(filepath.Dir(envs[consts.CGroupCpuAcctPath]))
 		} else {
-			c.pfsdcpumem.InitCpu(c.getContainerCgroupPath(envs[consts.CGroupCpuPath], "pfsd", envs))
+			c.podCpumem.InitCpu(filepath.Dir(envs[consts.CGroupCpuPath]))
 		}
-		c.logger.Info("pfsd cgroup path",
-			log.String("cpu", c.getContainerCgroupPath(envs[consts.CGroupCpuPath], "pfsd", envs)),
-			log.String("memory", c.getContainerCgroupPath(envs[consts.CGroupMemPath], "pfsd", envs)))
+		c.logger.Info("pod cgroup path",
+			log.String("cpu", filepath.Dir(envs[consts.CGroupCpuPath])),
+			log.String("memory", filepath.Dir(envs[consts.CGroupMemPath])))
 	}
 
 	if _, ok := envs[consts.CGroupHugeMemPath]; ok {
@@ -1112,19 +1193,34 @@ func (c *PolarDBPgCollector) getDBRole() (int, error) {
 	var inRecoveryMode bool
 	var err error
 
-	if nodetype, err := c.getNodeType(); err != nil {
-		c.logger.Warn("get node type failed", err)
-	} else {
-		if nodetype == "standalone_datamax" {
-			c.Role = "Logger"
-			return DataMax, nil
-		}
-	}
-
 	if inRecoveryMode, err = c.isInRecoveryMode(); err != nil {
 		c.Role = "Standby"
 		c.logger.Error("check with recovery mode failed.", err)
 		return StandBy, err
+	}
+
+	if nodetype, err := c.getNodeType(); err != nil {
+		c.logger.Warn("get node type failed", err)
+	} else {
+		switch nodetype {
+		case "master":
+			if inRecoveryMode {
+				c.Role = "RO"
+				return RO, nil
+			} else {
+				c.Role = "RW"
+				return RW, nil
+			}
+		case "replica":
+			c.Role = "RO"
+			return RO, nil
+		case "standby":
+			c.Role = "Standby"
+			return StandBy, nil
+		case "standalone_datamax":
+			c.Role = "Logger"
+			return DataMax, nil
+		}
 	}
 
 	if inRecoveryMode {
@@ -1378,6 +1474,10 @@ func (c *PolarDBPgCollector) checkIfNeedRestart() error {
 				log.Int64("old version", c.cInfo.dbConfigVersion), log.Int64("new version", version))
 			return err
 		}
+		if err = c.initMetaService(); err != nil {
+			c.logger.Warn("reinit meta service failed", err)
+			return err
+		}
 		c.cInfo.dbConfigNeedUpdate = false
 		c.logger.Info("db config version update",
 			log.Int64("old version", c.cInfo.dbConfigVersion),
@@ -1398,6 +1498,10 @@ func (c *PolarDBPgCollector) checkIfNeedRestart() error {
 				c.logger.Warn("reinit queries failed", err,
 					log.Int64("old version", c.cInfo.dbConfigVersion),
 					log.Int64("new version", version))
+				return err
+			}
+			if err = c.initMetaService(); err != nil {
+				c.logger.Warn("reinit meta service failed", err)
 				return err
 			}
 			c.cInfo.dbConfigNeedUpdate = false
@@ -1491,19 +1595,38 @@ func (c *PolarDBPgCollector) collectResourceStat(out map[string]interface{}) err
 		c.setPrCollectCpuCore(float64(cpuCores))
 		memTotal, _ := c.getMemTotal()
 
-		if err := c.prCollector.Collect(out); err != nil {
+		if err := c.prCollector.Collect(out, c.cInfo.intervalNano); err != nil {
 			c.logger.Error("collect process resource failed", err)
 		} else {
-			out["cpu_user_usage"] = out["procs_cpu_user_sum"]
-			out["cpu_sys_usage"] = out["procs_cpu_sys_sum"]
-			out["cpu_total_usage"] =
-				out["procs_cpu_user_sum"].(uint64) + out["procs_cpu_sys_sum"].(uint64)
+			if out["procs_cpu_user_sum"] != nil && out["procs_cpu_sys_sum"] != nil {
+				out["cpu_user"] = out["procs_cpu_user_sum"]
+				out["cpu_sys"] = out["procs_cpu_sys_sum"]
+				out["cpu_total"] =
+					out["procs_cpu_user_sum"].(float64) + out["procs_cpu_sys_sum"].(float64)
+			} else {
+				out["cpu_user"] = float64(0)
+				out["cpu_sys"] = float64(0)
+				out["cpu_total"] = float64(0)
+			}
+
+			out["cpu_user_usage"] = out["cpu_user"].(float64) / float64(cpuCores)
+			out["cpu_sys_usage"] = out["cpu_sys"].(float64) / float64(cpuCores)
+			out["cpu_total_usage"] = out["cpu_total"].(float64) / float64(cpuCores)
 
 			out["cpu_cores"] = uint64(cpuCores)
-			out["mem_total_usage"] =
-				uint64(float64(out["procs_mem_rss_sum"].(uint64)) / float64(memTotal))
+			// include shared memory
+			if share, ok := meta.GetMetaService().GetFloat("shared_memory_size_mb",
+				strconv.Itoa(c.Port)); ok {
+				out["mem_total_usage"] =
+					(out["procs_mem_rss_sum"].(float64) +
+						share) * 100 / float64(memTotal)
+				out["mem_total_used"] = (out["procs_mem_rss_sum"].(float64) + share)
+			} else {
+				out["mem_total_usage"] =
+					out["procs_mem_rss_sum"].(float64) * 100 / float64(memTotal)
+				out["mem_total_used"] = out["procs_mem_rss_sum"]
+			}
 
-			out["mem_total_used"] = out["procs_mem_rss_sum"]
 			out["mem_total"] = memTotal
 
 			// CPU and Memory formalize
@@ -1512,7 +1635,7 @@ func (c *PolarDBPgCollector) collectResourceStat(out map[string]interface{}) err
 				"mem_total_usage", "mem_total_used", "mem_total")
 		}
 	} else {
-		if err := c.prCollector.Collect(out); err != nil {
+		if err := c.prCollector.Collect(out, c.cInfo.intervalNano); err != nil {
 			c.logger.Error("collect process resource failed", err)
 		}
 	}
@@ -1584,34 +1707,142 @@ func (c *PolarDBPgCollector) Collect(out map[string]interface{}) error {
 	c.cInfo.timeNow = now
 	c.cInfo.count += 1
 
-	c.prCollector.intervalNano = uint64(c.cInfo.intervalNano)
-
 	if c.dbInfo.db == nil {
 		c.logger.Warn("db is nil", fmt.Errorf("db is nil"))
 		return nil
 	}
 
-	if err := c.checkIfNeedRestart(); err != nil {
-		c.logger.Info("we need to restart", log.String("info", err.Error()))
-		return err
+	// async collection
+	asyncCollector := func(name string, out map[string]interface{},
+		collect func(map[string]interface{}) error) {
+		select {
+		case c.asyncCollectionRunChannel[name] <- 1:
+		default:
+			c.logger.Warn("async collector already in running state",
+				nil, log.String("name", name))
+			return
+		}
+		defer func() { <-c.asyncCollectionRunChannel[name] }()
+
+		// try to pop out stale result
+		select {
+		case <-c.asyncCollectionResultChannel[name]:
+		default:
+		}
+
+		c.asyncCollectionResultChannel[name] <- collect(out)
 	}
 
-	if c.GetConfigMapValue(c.ConfigMap, "enable_db_resource_collect", "integer", 1).(int) == 1 {
-		if err := c.collectResourceStat(out); err != nil {
-			c.logger.Warn("collect resource stat failed.", err)
+	out1 := make(map[string]interface{})
+	go asyncCollector(DB_STAT_ROUTINE_KEY, out1, func(out map[string]interface{}) error {
+		if err := c.checkIfNeedRestart(); err != nil {
+			c.logger.Info("we need to restart", log.String("info", err.Error()))
+			return err
+		}
+
+		// these two order is important
+		if c.GetConfigMapValue(c.ConfigMap, "enable_db_metric_collect", "integer", 1).(int) == 1 {
+			c.dbInfo.db.Exec("SET log_min_messages=FATAL")
+
+			if err := c.collectDBStat(out1); err != nil {
+				c.logger.Warn("collect db stat failed.", err)
+			}
+		}
+
+		return nil
+	})
+
+	out2 := make(map[string]interface{})
+	go asyncCollector(RESOURCE_STAT_ROUTINE_KEY, out2, func(out map[string]interface{}) error {
+		if c.GetConfigMapValue(c.ConfigMap, "enable_db_resource_collect", "integer", 1).(int) == 1 {
+			if err := c.collectResourceStat(out2); err != nil {
+				c.logger.Warn("collect resource stat failed.", err)
+			}
+		}
+
+		return nil
+	})
+
+	// get result
+	dbstatCollectDone := false
+	resourceCollectDone := false
+	timeout := false
+	for {
+		select {
+		case err := <-c.asyncCollectionResultChannel[DB_STAT_ROUTINE_KEY]:
+			if err != nil {
+				return err
+			}
+			dbstatCollectDone = true
+		case err := <-c.asyncCollectionResultChannel[RESOURCE_STAT_ROUTINE_KEY]:
+			if err != nil {
+				return err
+			}
+			resourceCollectDone = true
+		case <-time.After(CollectTotalTimeout * time.Second):
+			c.logger.Warn("collect timeout", nil,
+				log.Bool("dbstat", dbstatCollectDone),
+				log.Bool("resource", resourceCollectDone))
+			timeout = true
+		}
+
+		if (dbstatCollectDone && resourceCollectDone) || timeout {
+			break
 		}
 	}
 
-	if c.GetConfigMapValue(c.ConfigMap, "enable_db_metric_collect", "integer", 1).(int) == 1 {
-		c.dbInfo.db.Exec("SET log_min_messages=FATAL")
+	// merge async collection results
+	mergeResult := func(merge ...map[string]interface{}) {
+		for _, mout := range merge {
+			for k, v := range mout {
+				if k != KEY_SEND_TO_MULTIBACKEND {
+					out[k] = v
+				} else {
+					if _, ok := out[KEY_SEND_TO_MULTIBACKEND]; !ok {
+						out[KEY_SEND_TO_MULTIBACKEND] = make(map[string]interface{})
+					}
 
-		if err := c.collectDBStat(out); err != nil {
-			c.logger.Warn("collect db stat failed.", err)
+					for k, v := range mout[KEY_SEND_TO_MULTIBACKEND].(map[string]interface{}) {
+						out[KEY_SEND_TO_MULTIBACKEND].(map[string]interface{})[k] = v
+					}
+				}
+			}
 		}
+	}
+
+	if dbstatCollectDone {
+		mergeResult(out1)
+	}
+
+	if resourceCollectDone {
+		mergeResult(out2)
 	}
 
 	if c.cInfo.useFullOutdict {
 		out[KEY_SEND_TO_MULTIBACKEND] = make(map[string]interface{})
+	}
+
+	// cache out dict
+	if c.cInfo.count == 1 || c.cInfo.count%DefaultLCMForAllIntervals == 0 {
+		c.cInfo.cacheout = make(map[string]interface{})
+		for k, v := range out {
+			if k != KEY_SEND_TO_MULTIBACKEND {
+				c.cInfo.cacheout[k] = v
+			}
+		}
+		c.logger.Debug("refresh cacheout", log.Int64("count", c.cInfo.count))
+	} else {
+		for k, v := range out {
+			if k != KEY_SEND_TO_MULTIBACKEND {
+				c.cInfo.cacheout[k] = v
+			}
+		}
+
+		for k, v := range c.cInfo.cacheout {
+			if _, ok := out[k]; !ok {
+				out[k] = v
+			}
+		}
 	}
 
 	// turn out from map[string]uint64 to map[string]string
@@ -1630,16 +1861,30 @@ func (c *PolarDBPgCollector) Collect(out map[string]interface{}) error {
 			continue
 		}
 
-		vint, ok := v.(uint64)
-		if ok {
-			out[k] = strconv.FormatUint(vint, 10)
-			if c.cInfo.useFullOutdict {
-				out[KEY_SEND_TO_MULTIBACKEND].(map[string]interface{})[k] = vint
-			}
-		} else {
-			c.logger.Warn("value can neither be converted to string nor uint64",
-				errors.New("value convert failed"), log.String("key", k))
+		if c.cInfo.useFullOutdict {
+			out[KEY_SEND_TO_MULTIBACKEND].(map[string]interface{})[k] = v
 		}
+
+		vfloat, ok := v.(float64)
+		if ok {
+			out[k] = strconv.FormatUint(uint64(vfloat), 10)
+			continue
+		}
+
+		vint, ok := v.(int64)
+		if ok {
+			out[k] = strconv.FormatUint(uint64(vint), 10)
+			continue
+		}
+
+		vuint, ok := v.(uint64)
+		if ok {
+			out[k] = strconv.FormatUint(vuint, 10)
+			continue
+		}
+
+		c.logger.Warn("value can neither be converted to string nor float64/int64/uint64",
+			errors.New("value convert failed"), log.String("key", k))
 	}
 
 	out["collect_timestamp"] = time.Now().Unix()
@@ -1811,9 +2056,9 @@ func (c *PolarDBPgCollector) setPrCollectCpuCore(cpuCores float64) error {
 
 func (c *PolarDBPgCollector) collectCgroupCPU(out map[string]interface{}) error {
 	calculateCPUUsage := func(key string, out map[string]interface{}, used uint64) {
-		c.calcDeltaWithoutSuffix(key, out, used)
+		c.calcDeltaWithoutSuffix(key, out, float64(used))
 		if x, ok := out[key]; ok {
-			out[key] = uint64(float64(x.(uint64)) * 100 / float64(c.cInfo.intervalNano))
+			out[key] = (x.(float64)) * 100 / float64(c.cInfo.intervalNano)
 		}
 	}
 
@@ -1821,9 +2066,9 @@ func (c *PolarDBPgCollector) collectCgroupCPU(out map[string]interface{}) error 
 		for _, k := range key {
 			if _, ok := out[k]; ok {
 				if _, xok := out[finalkey]; xok {
-					out[finalkey] = out[finalkey].(uint64) + out[k].(uint64)
+					out[finalkey] = out[finalkey].(float64) + out[k].(float64)
 				} else {
-					out[finalkey] = out[k].(uint64)
+					out[finalkey] = out[k].(float64)
 				}
 			}
 		}
@@ -1846,26 +2091,31 @@ func (c *PolarDBPgCollector) collectCgroupCPU(out map[string]interface{}) error 
 		calculateTotalCpu(out, "cpu_total", "engine_cpu_total")
 
 		if c.isPolarDB() {
-			if pfsdUserCpu, pfsdSysCpu, pfsdTotalCpu, err := c.pfsdcpumem.GetCpuUsage(); err != nil {
-				c.logger.Warn("get pfsd cpu usage failed", err)
-			} else {
-				calculateCPUUsage("pfsd_cpu_user", out, pfsdUserCpu)
-				calculateCPUUsage("pfsd_cpu_sys", out, pfsdSysCpu)
-				calculateCPUUsage("pfsd_cpu_total", out, pfsdTotalCpu)
-				// calculateTotalCpu(out, "cpu_user", "pfsd_cpu_user")
-				// calculateTotalCpu(out, "cpu_sys",  "pfsd_cpu_sys")
-				// calculateTotalCpu(out, "cpu_total", "pfsd_cpu_total")
+			cgroupCpuCollect := func(cg *cgroup.CPUMem, name string) {
+				if user, sys, total, err := cg.GetCpuUsage(); err != nil {
+					c.logger.Warn("get cpu usage failed", err, log.String("container", name))
+				} else {
+					calculateCPUUsage(name+"_cpu_user", out, user)
+					calculateCPUUsage(name+"_cpu_sys", out, sys)
+					calculateCPUUsage(name+"_cpu_total", out, total)
+				}
 			}
+
+			cgroupCpuCollect(c.pfsdcpumem, "pfsd")
+			cgroupCpuCollect(c.pfsdToolCpumem, "pfsd_tool")
+			cgroupCpuCollect(c.managerCpumem, "manager")
+			cgroupCpuCollect(c.pauseCpumem, "pause")
+			cgroupCpuCollect(c.podCpumem, "pod")
 		}
 
 		if cpuCoresLimit != 0 {
-			calculateCPUUsage("cgroup_cpu_user", out, uint64(float64(userCpu)/cpuCoresLimit))
-			calculateCPUUsage("cgroup_cpu_sys", out, uint64(float64(sysCpu)/cpuCoresLimit))
-			calculateCPUUsage("cgroup_cpu_total", out, uint64(float64(totalCpu)/cpuCoresLimit))
+			calculateCPUUsage("cgroup_cpu_user", out, userCpu)
+			calculateCPUUsage("cgroup_cpu_sys", out, sysCpu)
+			calculateCPUUsage("cgroup_cpu_total", out, totalCpu)
 			if _, ok := out["cgroup_cpu_total"]; ok {
-				out["cpu_user_usage"] = out["cgroup_cpu_user"]
-				out["cpu_sys_usage"] = out["cgroup_cpu_sys"]
-				out["cpu_total_usage"] = out["cgroup_cpu_total"]
+				out["cpu_user_usage"] = out["cgroup_cpu_user"].(float64) / float64(cpuCoresLimit)
+				out["cpu_sys_usage"] = out["cgroup_cpu_sys"].(float64) / float64(cpuCoresLimit)
+				out["cpu_total_usage"] = out["cgroup_cpu_total"].(float64) / float64(cpuCoresLimit)
 			}
 		}
 		c.logger.Debug("db_cpu_info",
@@ -1891,9 +2141,9 @@ func (c *PolarDBPgCollector) collectCgroupCPU(out map[string]interface{}) error 
 	if err != nil {
 		c.logger.Warn("get cpu limit failed.", err)
 	} else {
-		c.calcDeltaWithoutSuffix("cpu_nr_periods", out, cpuNrPeriods)
-		c.calcDeltaWithoutSuffix("cpu_nr_throttled", out, cpuNrThrottled)
-		c.calcDeltaWithoutSuffix("cpu_throttled_time", out, throttledTime)
+		c.calcDeltaWithoutSuffix("cpu_nr_periods", out, float64(cpuNrPeriods))
+		c.calcDeltaWithoutSuffix("cpu_nr_throttled", out, float64(cpuNrThrottled))
+		c.calcDeltaWithoutSuffix("cpu_throttled_time", out, float64(throttledTime))
 	}
 
 	// CPU formalize
@@ -1985,25 +2235,63 @@ func (c *PolarDBPgCollector) collectCgroupMemory(out map[string]interface{}) err
 		}
 	}
 
-	out["cgroup_mem_limit"] = memlimit / 1024 / 1024 // MB
-	out["mem_total"] = memlimit / 1024 / 1024
+	out["cgroup_mem_limit"] = float64(memlimit) / 1024 / 1024 // MB
+	out["mem_total"] = float64(memlimit) / 1024 / 1024
 
 	memstat, err := c.cpumem.GetMemoryStat()
 	if err != nil {
 		c.logger.Warn("get cgroup memory failed.", err)
 		return err
 	}
-	out["mem_rss"] = memstat.Rss / 1024 / 1024
-	out["mem_cache"] = memstat.Cache / 1024 / 1024
-	out["mem_mapped_file"] = memstat.MappedFile / 1024 / 1024
-	out["mem_inactiverss"] = memstat.InactiveAnon / 1024 / 1024
-	out["mem_inactivecache"] = memstat.InActiveFile / 1024 / 1024
+	out["mem_rss"] = float64(memstat.Rss) / 1024 / 1024
+	out["mem_cache"] = float64(memstat.Cache) / 1024 / 1024
+	out["mem_mapped_file"] = float64(memstat.MappedFile) / 1024 / 1024
+	out["mem_inactiverss"] = float64(memstat.InactiveAnon) / 1024 / 1024
+	out["mem_inactivecache"] = float64(memstat.InActiveFile) / 1024 / 1024
 	out["cgroup_mem_usage"] =
-		uint64(float64(memstat.Rss+memstat.MappedFile) / float64(memlimit) * 100)
+		float64(memstat.Rss+memstat.MappedFile) * 100 / float64(memlimit)
 	out["mem_total_usage"] = out["cgroup_mem_usage"]
-	out["mem_total_used"] = memstat.Rss/1024/1024 + memstat.MappedFile/1024/1024
+	out["mem_total_used"] = float64(memstat.Rss+memstat.MappedFile) / 1024 / 1024
 
 	if c.isPolarDB() {
+		cgroupMemCollect := func(cg *cgroup.CPUMem, name string) {
+			memusage, err := cg.GetMemoryUsage()
+			if err != nil {
+				c.logger.Warn("get memory usage failed", err, log.String("container", name))
+			} else {
+				out[name+"_mem_used"] = float64(memusage) / 1024 / 1024
+			}
+
+			memstat, err := cg.GetMemoryStat()
+			if err != nil {
+				c.logger.Warn("get memory stat failed", err, log.String("container", name))
+			} else {
+				out[name+"_mem_rss"] = float64(memstat.Rss) / 1024 / 1024
+				out[name+"_mem_cache"] = float64(memstat.Cache) / 1024 / 1024
+				out[name+"_mem_mapped_file"] = float64(memstat.MappedFile) / 1024 / 1024
+				out[name+"_mem_swap"] = float64(memstat.Swap) / 1024 / 1024
+				out[name+"_mem_activeanon"] = float64(memstat.ActiveAnon) / 1024 / 1024
+				out[name+"_mem_activefile"] = float64(memstat.ActiveFile) / 1024 / 1024
+				out[name+"_mem_inactiveanon"] = float64(memstat.InactiveAnon) / 1024 / 1024
+				out[name+"_mem_inactivefile"] = float64(memstat.InActiveFile) / 1024 / 1024
+			}
+
+			kmemUsage, err := cg.GetKernalMemoryUsage()
+			if err != nil {
+				c.logger.Warn("get kernel memory usage failed", err, log.String("container", name))
+			} else {
+				out[name+"_kmem_used"] = float64(kmemUsage) / 1024 / 1024
+			}
+
+		}
+
+		cgroupMemCollect(c.pfsdcpumem, "pfsd")
+		cgroupMemCollect(c.pfsdToolCpumem, "pfsd_tool")
+		cgroupMemCollect(c.managerCpumem, "manager")
+		cgroupMemCollect(c.pauseCpumem, "pause")
+		cgroupMemCollect(c.cpumem, "engine")
+		cgroupMemCollect(c.podCpumem, "pod")
+
 		pfsdMemUsage, err := c.pfsdcpumem.GetMemoryUsage()
 		if err != nil {
 			c.logger.Warn("get pfsd memory usage failed", err)
@@ -2015,14 +2303,14 @@ func (c *PolarDBPgCollector) collectCgroupMemory(out map[string]interface{}) err
 		if err != nil {
 			c.logger.Warn("get pfsd memory stat failed", err)
 		} else {
-			out["mem_rss"] = (memstat.Rss + pfsdMemStat.Rss) / 1024 / 1024
-			out["mem_cache"] = (memstat.Cache + pfsdMemStat.Cache) / 1024 / 1024
-			out["mem_mapped_file"] = (memstat.MappedFile + pfsdMemStat.MappedFile) / 1024 / 1024
-			out["mem_inactiverss"] = (memstat.InactiveAnon + pfsdMemStat.InactiveAnon) / 1024 / 1024
-			out["mem_inactivecache"] = (memstat.InActiveFile + pfsdMemStat.InActiveFile) / 1024 / 1024
+			out["mem_rss"] = float64(memstat.Rss+pfsdMemStat.Rss) / 1024 / 1024
+			out["mem_cache"] = float64(memstat.Cache+pfsdMemStat.Cache) / 1024 / 1024
+			out["mem_mapped_file"] = float64(memstat.MappedFile+pfsdMemStat.MappedFile) / 1024 / 1024
+			out["mem_inactiverss"] = float64(memstat.InactiveAnon+pfsdMemStat.InactiveAnon) / 1024 / 1024
+			out["mem_inactivecache"] = float64(memstat.InActiveFile+pfsdMemStat.InActiveFile) / 1024 / 1024
 			if memlimitcgroup != c.cpumem {
-				out["cgroup_mem_usage"] = uint64(float64(memstat.Rss+memstat.MappedFile+pfsdMemStat.Rss+pfsdMemStat.MappedFile) / float64(memlimit) * 100)
-				out["mem_total_used"] = uint64(memstat.Rss + memstat.MappedFile + pfsdMemStat.Rss + pfsdMemStat.MappedFile)
+				out["cgroup_mem_usage"] = float64(memstat.Rss+memstat.MappedFile+pfsdMemStat.Rss+pfsdMemStat.MappedFile) * 100 / float64(memlimit)
+				out["mem_total_used"] = float64(memstat.Rss+memstat.MappedFile+pfsdMemStat.Rss+pfsdMemStat.MappedFile) / 1024 / 1024
 				out["mem_total_usage"] = out["cgroup_mem_usage"]
 			}
 		}
@@ -2052,18 +2340,18 @@ func (c *PolarDBPgCollector) collectCgroupIO(out map[string]interface{}) error {
 	if err != nil {
 		c.logger.Warn("get local io count failed.", err)
 	} else {
-		c.calcDeltaWithoutSuffix("local_iops", out, stat.DataIo+stat.LogIo)
-		c.calcDeltaWithoutSuffix("local_data_iops", out, stat.DataIo)
-		c.calcDeltaWithoutSuffix("local_wal_iops", out, stat.LogIo)
+		c.calcDeltaWithoutSuffix("local_iops", out, float64(stat.DataIo+stat.LogIo))
+		c.calcDeltaWithoutSuffix("local_data_iops", out, float64(stat.DataIo))
+		c.calcDeltaWithoutSuffix("local_wal_iops", out, float64(stat.LogIo))
 	}
 
 	stat, err = c.cgroupio.GetIoBytes()
 	if err != nil {
 		c.logger.Warn("get local throughput failed.", err)
 	} else {
-		c.calcDeltaWithoutSuffix("local_throughput", out, (stat.DataIo+stat.LogIo)/1024/1024)
-		c.calcDeltaWithoutSuffix("local_data_throughput", out, stat.DataIo/1024/1024)
-		c.calcDeltaWithoutSuffix("local_wal_throughput", out, stat.LogIo/1024/1024)
+		c.calcDeltaWithoutSuffix("local_throughput", out, float64((stat.DataIo+stat.LogIo)/1024/1024))
+		c.calcDeltaWithoutSuffix("local_data_throughput", out, float64(stat.DataIo/1024/1024))
+		c.calcDeltaWithoutSuffix("local_wal_throughput", out, float64(stat.LogIo/1024/1024))
 	}
 
 	return nil
@@ -2146,7 +2434,7 @@ func (c *PolarDBPgCollector) collectSQLStat(
 				columnsPtr[i] = &sql.NullString{}
 				continue
 			}
-			columnsPtr[i] = &sql.NullInt64{}
+			columnsPtr[i] = &sql.NullFloat64{}
 		}
 
 		for rows.Next() {
@@ -2178,18 +2466,18 @@ func (c *PolarDBPgCollector) collectSQLStat(
 			for i, col := range cols {
 				colName := col.Name()
 
-				ptrInt, ok := columnsPtr[i].(*sql.NullInt64)
+				ptrInt, ok := columnsPtr[i].(*sql.NullFloat64)
 				if !ok {
-					c.logger.Error("parse to int64 error",
+					c.logger.Error("parse to float64 error",
 						errors.New("parse int error"),
 						log.String("col", col.Name()))
 					continue
 				}
 
 				if strings.HasSuffix(colName, "_delta") {
-					c.calDeltaData(colName, c.cInfo.timeNow.Unix(), out, uint64(ptrInt.Int64))
+					c.calDeltaData(colName, c.cInfo.timeNow.Unix(), out, (ptrInt.Float64))
 				} else {
-					out[colName] = uint64(ptrInt.Int64)
+					out[colName] = ptrInt.Float64
 				}
 
 				if queryCtx.SendToMultiBackend != 0 {
@@ -2223,15 +2511,24 @@ func (c *PolarDBPgCollector) collectDBStat(out map[string]interface{}) error {
 		c.logger.Error("collect sql stat failed", err)
 	}
 
+	// other
+	if _, ok := out["shared_memory_size_mb"]; ok {
+		meta.GetMetaService().SetFloat("shared_memory_size_mb", strconv.Itoa(c.Port),
+			out["shared_memory_size_mb"].(float64))
+	}
+
 	return nil
 }
 
 func (c *PolarDBPgCollector) calDeltaData(deltaname string, timestamp int64,
-	out map[string]interface{}, value uint64) {
+	out map[string]interface{}, value float64) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	// orgname := strings.TrimSuffix(deltaname, "_delta")
 	if orgvalue, ok := c.preValueMap[deltaname]; ok {
 		if value >= orgvalue.Value && timestamp > orgvalue.LastTime {
-			out[deltaname] = (value - orgvalue.Value) / uint64(timestamp-orgvalue.LastTime)
+			out[deltaname] = (value - orgvalue.Value) / float64(timestamp-orgvalue.LastTime)
 		}
 	}
 	c.preValueMap[deltaname] = PreValue{LastTime: timestamp, Value: value}
@@ -2239,7 +2536,10 @@ func (c *PolarDBPgCollector) calDeltaData(deltaname string, timestamp int64,
 }
 
 func (c *PolarDBPgCollector) calcDeltaWithoutSuffix(name string,
-	out map[string]interface{}, value uint64) {
+	out map[string]interface{}, value float64) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	if orgvalue, ok := c.rawPre[name]; ok {
 		if value >= orgvalue {
 			out[name] = value - orgvalue
@@ -2263,12 +2563,10 @@ func (c *PolarDBPgCollector) execDB(sql string) error {
 }
 
 func (c *PolarDBPgCollector) queryDB(sql string) (*sql.Rows, context.CancelFunc, error) {
-	collectTime := time.Now().UnixNano() / 1e6
+	defer c.timeTrack(sql, time.Now())
 	ctx, cancel := context.WithTimeout(context.Background(), DBQueryTimeout*time.Second)
 
 	rows, err := c.dbInfo.db.QueryContext(ctx, "/* rds internal mark */ "+sql)
-	c.logger.Debug("collect ins done.", log.String("sql", sql),
-		log.Int64("duration", time.Now().UnixNano()/1e6-collectTime))
 
 	if err != nil {
 		c.logger.Error("query db failed", err, log.String("sql", sql))
@@ -2287,6 +2585,14 @@ func (c *PolarDBPgCollector) Stop() error {
 		c.importedCollector.removeInstance(c.plutoCtx, "",
 			c.dirInfo.dataDir, c.dirInfo.newlogDir,
 			c.dirInfo.baseDir, c.dirInfo.newWalDir)
+	}
+
+	for _, c := range c.asyncCollectionRunChannel {
+		close(c)
+	}
+
+	for _, c := range c.asyncCollectionResultChannel {
+		close(c)
 	}
 
 	c.prCollector.Stop()
@@ -2405,12 +2711,44 @@ func (c *PolarDBPgCollector) collectLocalVolumeCapacityWithDf(dfmap map[string]i
 		dfmap["fs_blocks_total"] = dfmap["size_total"]
 		dfmap["fs_blocks_used"] = dfmap["size_used"]
 		dfmap["fs_blocks_usage"] = dfmap["size_usage"]
-		dfmap["fs_size_total"] = uint64(dfmap["size_total"].(uint64) / 1024)
-		dfmap["fs_size_used"] = uint64(dfmap["size_used"].(uint64) / 1024)
-		dfmap["fs_size_usage"] = uint64(dfmap["size_usage"].(uint64))
+		dfmap["fs_size_total"] = float64(dfmap["size_total"].(uint64)) / 1024
+		dfmap["fs_size_used"] = float64(dfmap["size_used"].(uint64)) / 1024
+		dfmap["fs_size_usage"] = float64(dfmap["size_usage"].(uint64))
 
 		break
 	}
 
 	return nil
+}
+
+func (c *PolarDBPgCollector) initCgroupCollectObj(cg *cgroup.CPUMem, envs map[string]string, name string) {
+	cg.InitMemory(c.getContainerCgroupPath(envs[consts.CGroupMemPath], name, envs))
+	if _, ok := envs[consts.CGroupCpuAcctPath]; ok {
+		cg.InitCpu(c.getContainerCgroupPath(envs[consts.CGroupCpuAcctPath], name, envs))
+	} else {
+		cg.InitCpu(c.getContainerCgroupPath(envs[consts.CGroupCpuPath], name, envs))
+	}
+	c.logger.Info("cgroup path",
+		log.String("container name", name),
+		log.String("cpu", c.getContainerCgroupPath(envs[consts.CGroupCpuPath], name, envs)),
+		log.String("memory", c.getContainerCgroupPath(envs[consts.CGroupMemPath], name, envs)))
+	cg.InitMemory(c.getContainerCgroupPath(envs[consts.CGroupMemPath], name, envs))
+	if _, ok := envs[consts.CGroupCpuAcctPath]; ok {
+		cg.InitCpu(c.getContainerCgroupPath(envs[consts.CGroupCpuAcctPath], name, envs))
+	} else {
+		cg.InitCpu(c.getContainerCgroupPath(envs[consts.CGroupCpuPath], name, envs))
+	}
+	c.logger.Debug("pfsd cgroup path",
+		log.String("cpu", c.getContainerCgroupPath(envs[consts.CGroupCpuPath], name, envs)),
+		log.String("memory", c.getContainerCgroupPath(envs[consts.CGroupMemPath], name, envs)))
+}
+
+func (c *PolarDBPgCollector) timeTrack(key string, start time.Time) {
+	elapsed := time.Since(start)
+	if elapsed.Milliseconds() >= c.cInfo.slowCollectionLogThreshold {
+		c.logger.Info("slow collection",
+			log.String("function", key),
+			log.Int64("thres", c.cInfo.slowCollectionLogThreshold),
+			log.Int64("elapsed", elapsed.Milliseconds()))
+	}
 }

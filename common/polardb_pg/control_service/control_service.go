@@ -35,6 +35,7 @@ import (
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/control_service/polardb"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/meta"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/utils"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/plugins/db_backend/dao"
 	grpc "google.golang.org/grpc"
 	"gopkg.in/yaml.v2"
@@ -189,7 +190,7 @@ func (s *server) SyncInstance(ctx context.Context,
 
 	defer TimeTrack("SyncInstance", time.Now())
 
-	log.Info("[control_service] SyncInstance request",
+	log.Debug("[control_service] SyncInstance request",
 		log.String("instype", in.Ins.Instype),
 		log.String("local", fmt.Sprintf("%s:%d", in.Ins.Host, in.Ins.Port)),
 		log.String("rw", fmt.Sprintf("%s:%d", in.Rw.Host, in.Rw.Port)))
@@ -220,6 +221,7 @@ func (s *server) SyncInstance(ctx context.Context,
 	result := polardb.SyncInstanceResponse{}
 	result.Code = 0
 	result.Msg = ""
+	result.Version = utils.ShowVersion()
 
 	log.Debug("[control_service] SyncInstance",
 		log.String("response", fmt.Sprintf("%+v", result)))

@@ -32,7 +32,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/drone/routes"
 	"github.com/pkg/errors"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
 )
@@ -77,16 +76,12 @@ type PolarDBPgService struct {
 }
 
 func (s *PolarDBPgService) Start() error {
-	mux := routes.New()
-	mux.Post("/v1/metrics", s.CollectMetrics)
-	http.Handle("/", mux)
+	mux := http.NewServeMux()
+	mux.Handle("/v1/metrics", s)
 
-	s.Server = &http.Server{
-		Addr: ":" + s.Port,
-	}
 	go func() {
 		for {
-			err := s.Server.ListenAndServe()
+			err := http.ListenAndServe(":"+s.Port, mux)
 			if err == http.ErrServerClosed {
 				log.Info("PolarDBPgService server closed!")
 				return
@@ -114,7 +109,7 @@ func (s *PolarDBPgService) ResponseError(rsp http.ResponseWriter, err error) {
 	rsp.Write(resp)
 }
 
-func (s *PolarDBPgService) CollectMetrics(rsp http.ResponseWriter, req *http.Request) {
+func (s *PolarDBPgService) ServeHTTP(rsp http.ResponseWriter, req *http.Request) {
 	var err error
 	var buffer []byte
 
@@ -160,11 +155,15 @@ func (s *PolarDBPgService) CollectMetrics(rsp http.ResponseWriter, req *http.Req
 	rsp.Write(resp)
 }
 
+const KEY_SEND_TO_MULTIBACKEND = "send_to_multibackend"
+
 func (s *PolarDBPgService) Set(k string, v map[string]interface{}) error {
 	s.Lock.Lock()
 	defer s.Lock.Unlock()
 
-	s.Metrics[k] = v
+	if k != KEY_SEND_TO_MULTIBACKEND {
+		s.Metrics[k] = v
+	}
 
 	return nil
 }

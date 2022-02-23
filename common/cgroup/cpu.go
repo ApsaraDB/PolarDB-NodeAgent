@@ -67,6 +67,8 @@ const (
 	memoryStat         = "memory.stat"
 	memoryLimitInBytes = "memory.limit_in_bytes"
 
+    kmemoryUsageInBytes = "memory.kmem.usage_in_bytes"
+
 	hugeTlb2MUsageInBytes = "hugetlb.2MB.usage_in_bytes"
 	hugeTlb1GUsageInbytes = "hugetlb.1GB.usage_in_bytes"
 )
@@ -128,6 +130,7 @@ type CPUMem struct {
 	memoryUsageInBytesPath  string
 	memoryStatPath          string
 	memoryLimitInBytesPath  string
+    kmemoryUsageInBytesPath string
 	hugeTlbUsageInBytesPath string
 	tick                    uint64
 }
@@ -153,6 +156,7 @@ func (cm *CPUMem) InitMemory(path string) error {
 	cm.memoryUsageInBytesPath = filepath.Join(path, memoryUsageInBytes)
 	cm.memoryStatPath = filepath.Join(path, memoryStat)
 	cm.memoryLimitInBytesPath = filepath.Join(path, memoryLimitInBytes)
+    cm.kmemoryUsageInBytesPath = filepath.Join(path, kmemoryUsageInBytes)
 	return nil
 }
 
@@ -241,6 +245,12 @@ func (cm *CPUMem) GetMemoryLimit() (uint64, error) {
 	limit, err := cm.getSingleValue(cm.memoryLimitInBytesPath)
 	return uint64(limit), err
 }
+
+func (cm *CPUMem) GetKernalMemoryUsage() (uint64, error) {
+	usage, err := cm.getSingleValue(cm.kmemoryUsageInBytesPath)
+	return uint64(usage), err
+}
+
 func (cm *CPUMem) GetCpuStat() (uint64, uint64, uint64, error) {
 
 	err := cm.scanFile(cm.cpuStatPath, func(fields []string) error {

@@ -597,9 +597,11 @@ func (ins *Instance) Init(name string,
 			return err
 		}
 
-		err = ins.initSQLs(initsqls)
-		if err != nil {
-			ins.logger.Warn("init sqls failed", err)
+		if dbinfo.DBType != "SQLITE" {
+			err = ins.initSQLs(initsqls)
+			if err != nil {
+				ins.logger.Warn("init sqls failed", err)
+			}
 		}
 
 		ins.routinemap = make(map[string]int)
@@ -695,7 +697,7 @@ REINIT:
 			return err
 		}
 
-		ins.logger.Info("create table", log.String("table", fmt.Sprintf("%+v", table)))
+		ins.logger.Debug("create table", log.String("table", fmt.Sprintf("%+v", table)))
 	}
 
 	// 2. prepare insert schemas
@@ -1281,7 +1283,7 @@ func (ins *Instance) initFromAggTable(table *TimeSeriesTable) error {
 func (ins *Instance) checkAndUpgradeDB(local *Instance, isFirst bool) error {
 	for k, v := range ins.TableMap {
 		if lt, ok := local.TableMap[k]; !ok {
-			ins.logger.Info("need to create table", log.String("name", k))
+			ins.logger.Debug("need to create table", log.String("name", k))
 			err := ins.createTables(v)
 			if err != nil {
 				ins.logger.Error("create tables failed", err,
@@ -1499,7 +1501,7 @@ func (ins *Instance) aggregateRoutine(table *TimeSeriesTable, agg int, stop chan
 	extraTime := 10 + rand.Int()%30
 	timenow := time.Now()
 
-	ins.logger.Info("start aggregation",
+	ins.logger.Debug("start aggregation",
 		log.String("table", table.Name), log.Int("granularity", agg))
 
 	updater := func(agg int) time.Duration {
@@ -1528,7 +1530,7 @@ func (ins *Instance) aggregateRoutine(table *TimeSeriesTable, agg int, stop chan
 					log.Int("aggregation", agg))
 			}
 		case <-stop:
-			ins.logger.Info("stop the timer",
+			ins.logger.Debug("stop the timer",
 				log.String("table", table.Name),
 				log.Int("aggregation", agg))
 			return
@@ -1536,7 +1538,7 @@ func (ins *Instance) aggregateRoutine(table *TimeSeriesTable, agg int, stop chan
 
 		nexttick := updater(agg)
 
-		ins.logger.Info("aggregation",
+		ins.logger.Debug("aggregation",
 			log.String("table", table.Name),
 			log.String("base time",
 				time.Now().Add(-time.Duration(extraTime)*time.Second).Format("2006-01-02 15:04:05")),
@@ -1552,7 +1554,7 @@ func (ins *Instance) aggregateRoutine(table *TimeSeriesTable, agg int, stop chan
 func (ins *Instance) retainRoutine(stop chan int) {
 	var timer *time.Timer
 
-	ins.logger.Info("start retention",
+	ins.logger.Debug("start retention",
 		log.String("ins", ins.Name),
 		log.Int("default retention interval", RETENTION_INTERVAL),
 		log.Int("default retention time", RETENTION_TIME))
@@ -1572,7 +1574,7 @@ func (ins *Instance) retainRoutine(stop chan int) {
 			nexttick = nexttick.Add(time.Duration(RETENTION_INTERVAL) * time.Second)
 		}
 
-		ins.logger.Info("next retention time for instance",
+		ins.logger.Debug("next retention time for instance",
 			log.String("time", nexttick.String()),
 			log.Int("default retention interval", RETENTION_INTERVAL),
 			log.Int("default retention time", RETENTION_TIME))
@@ -1580,9 +1582,10 @@ func (ins *Instance) retainRoutine(stop chan int) {
 	}
 
 	retention := func(timenow int) {
+		maxRetention := 0
 		for _, table := range ins.TableMap {
 			agg := Aggregation{0, table.Retention}
-			ins.logger.Info("retention fact table",
+			ins.logger.Debug("retention fact table",
 				log.String("table", table.Name),
 				log.Int("aggregation", agg.Granularity),
 				log.Int("retention", agg.Retention))
@@ -1593,8 +1596,12 @@ func (ins *Instance) retainRoutine(stop chan int) {
 					log.Int("retention", agg.Retention))
 			}
 
+			if agg.Retention > maxRetention {
+				maxRetention = agg.Retention
+			}
+
 			for _, agg := range table.AggregationMap {
-				ins.logger.Info("retention agg table",
+				ins.logger.Debug("retention agg table",
 					log.String("table", table.Name),
 					log.Int("aggregation", agg.Granularity),
 					log.Int("retention", agg.Retention))
@@ -1604,46 +1611,29 @@ func (ins *Instance) retainRoutine(stop chan int) {
 						log.Int("aggregation", agg.Granularity),
 						log.Int("retention", agg.Retention))
 				}
+
+				if agg.Retention > maxRetention {
+					maxRetention = agg.Retention
+				}
+			}
+		}
+
+		if ins.DBInfo.DBType != "SQLITE" {
+			// retention for snapshots
+			err := ins.retainSnapshots(timenow, maxRetention)
+			if err != nil {
+				ins.logger.Warn("retain snapshots failed", err, log.Int("retention", maxRetention))
 			}
 		}
 	}
 
 	retention(int(time.Now().Unix()))
-
 	timer = time.NewTimer(updater())
 
 	for {
 		select {
 		case ticknow := <-timer.C:
-			timenow := int(ticknow.Unix())
-			for _, table := range ins.TableMap {
-				agg := Aggregation{0, table.Retention}
-
-				ins.logger.Info("retain fact table",
-					log.String("table", table.Name),
-					log.Int("retention", agg.Retention))
-
-				if err := ins.retainTables(table, timenow, agg); err != nil {
-					ins.logger.Warn("retain table failed", err,
-						log.String("table", table.Name),
-						log.Int("aggregation", agg.Granularity),
-						log.Int("retention", agg.Retention))
-				}
-
-				for _, agg := range table.AggregationMap {
-					ins.logger.Info("retain agg table",
-						log.String("table", table.Name),
-						log.Int("retention", agg.Retention))
-
-					if err := ins.retainTables(table, timenow, agg); err != nil {
-						ins.logger.Warn("retain agg failed", err,
-							log.String("table", table.Name),
-							log.Int("aggregation", agg.Granularity),
-							log.Int("retention", agg.Retention))
-					}
-				}
-			}
-
+			retention(int(ticknow.Unix()))
 		case <-stop:
 			ins.logger.Info("stop the timer for retention")
 			return
@@ -1748,6 +1738,26 @@ func (ins *Instance) retainTables(table *TimeSeriesTable, now int, aggregation A
 	return nil
 }
 
+func (ins *Instance) retainSnapshots(now int, retention int) error {
+	name := "meta_snapshots"
+	query := fmt.Sprintf("DELETE FROM %s WHERE time < %d", name, now-retention)
+	_, err := ins.db.Exec(query)
+	if err != nil {
+		ins.logger.Error("execute retention snapshots query failed", err,
+			log.String("table", name),
+			log.Int("retention", retention),
+			log.String("query", query))
+		return err
+	}
+
+	ins.logger.Info("retain for snapshots",
+		log.String("table", name),
+		log.Int("now", now),
+		log.Int("retention", retention))
+
+	return nil
+}
+
 func (ins *Instance) prepareInsert(table *TimeSeriesTable,
 	schema []string) (map[string]map[int]string, []string, []string, []int, error) {
 	defer ins.timeTrack("prepare insert for "+table.Name, time.Now())
@@ -1757,7 +1767,7 @@ func (ins *Instance) prepareInsert(table *TimeSeriesTable,
 	fullschemas := make([]string, 0)
 	placement := make([]int, 0)
 
-    needRecreateView := false
+	needRecreateView := false
 	hastime := false
 	for i, column := range schema {
 		column = strings.ToLower(column)
@@ -1810,9 +1820,9 @@ func (ins *Instance) prepareInsert(table *TimeSeriesTable,
 				table.TagMap[column] = c
 				table.FactTable.TagMap[column] = c
 
-                needRecreateView = true
+				needRecreateView = true
 
-				ins.logger.Info("add column success for",
+				ins.logger.Debug("add column success for",
 					log.String("table", table.Name), log.String("column", column))
 
 				for aggkey := range table.AggregationMap {
@@ -1823,11 +1833,11 @@ func (ins *Instance) prepareInsert(table *TimeSeriesTable,
 						return nil, nil, nil, nil, err
 					}
 
-				//	err = ins.recreateView(table, int(agg))
-				//	if err != nil {
-				//		ins.logger.Warn("recreate view failed", err,
-				//			log.String("table", table.Name))
-				//	}
+					//	err = ins.recreateView(table, int(agg))
+					//	if err != nil {
+					//		ins.logger.Warn("recreate view failed", err,
+					//			log.String("table", table.Name))
+					//	}
 				}
 
 				schemanames = append(schemanames, "tag_"+column)
@@ -1837,6 +1847,9 @@ func (ins *Instance) prepareInsert(table *TimeSeriesTable,
 		} else if _, ok := table.ValueMap[column]; !ok {
 			// add non exist value column automaticly
 			c := &Column{Name: column, Type: "REAL", AggType: "AVG"}
+			if column == "begin_snapshot_time" {
+				c = &Column{Name: column, Type: "INTEGER", AggType: "AVG"}
+			}
 			err := ins.addValueColumn(table, c, 0)
 			if err != nil {
 				ins.logger.Error("add value column failed", err,
@@ -1848,7 +1861,7 @@ func (ins *Instance) prepareInsert(table *TimeSeriesTable,
 			table.ValueMap[column] = c
 			table.FactTable.ValueMap[column] = c
 
-            needRecreateView = true
+			needRecreateView = true
 			// err = ins.recreateView(table, 0)
 			// if err != nil {
 			// 	ins.logger.Warn("recreate view failed", err,
@@ -1885,20 +1898,20 @@ func (ins *Instance) prepareInsert(table *TimeSeriesTable,
 		return nil, nil, nil, nil, err
 	}
 
-    if needRecreateView {
-        err := ins.recreateView(table, 0)
-        if err != nil {
-            ins.logger.Warn("recreate view failed", err, log.String("table", table.Name))
-        }
+	if needRecreateView {
+		err := ins.recreateView(table, 0)
+		if err != nil {
+			ins.logger.Warn("recreate view failed", err, log.String("table", table.Name))
+		}
 
-        for aggkey := range table.AggregationMap {
-            agg, _ := strconv.ParseInt(aggkey, 10, 64)
-            err = ins.recreateView(table, int(agg))
-            if err != nil {
-                ins.logger.Warn("recreate agg view failed", err, log.String("table", table.Name))
-            }
-        }
-    }
+		for aggkey := range table.AggregationMap {
+			agg, _ := strconv.ParseInt(aggkey, 10, 64)
+			err = ins.recreateView(table, int(agg))
+			if err != nil {
+				ins.logger.Warn("recreate agg view failed", err, log.String("table", table.Name))
+			}
+		}
+	}
 
 	return dimtablemap, schemanames, fullschemas, placement, nil
 }
@@ -1928,8 +1941,8 @@ func (ins *Instance) getDimensionValueID(
 			dimid = line[i].(int)
 			dimvalue = append(dimvalue, "'"+strconv.FormatInt(int64(line[i].(int)), 10)+"'")
 		} else {
-			condition = append(condition, fmt.Sprintf(" %s = '%s' ", c, line[i].(string)))
-			dimvalue = append(dimvalue, "'"+line[i].(string)+"'")
+			condition = append(condition, fmt.Sprintf(" %s = '%s' ", c, strings.Replace(line[i].(string), "'", "''", -1)))
+			dimvalue = append(dimvalue, "'"+strings.Replace(line[i].(string), "'", "''", -1)+"'")
 		}
 		insertschema = append(insertschema, c)
 	}
@@ -2030,7 +2043,7 @@ func (ins *Instance) getDimensionValueID(
 			id = dimid
 		}
 
-		ins.logger.Info("add dim value success",
+		ins.logger.Debug("add dim value success",
 			log.String("table", name),
 			log.String("dim", dimname),
 			log.String("value", conditionstr))
@@ -2171,7 +2184,7 @@ func (ins *Instance) createFactTable(t *TimeSeriesTable, agg int) error {
 		}
 	}
 
-	ins.logger.Info("create fact table", log.String("table", t.Name), log.Int("agg", agg))
+	ins.logger.Debug("create fact table", log.String("table", t.Name), log.Int("agg", agg))
 
 	return nil
 }
@@ -2238,7 +2251,7 @@ func (ins *Instance) createDimensionTable(t *TimeSeriesTable, dim *DimensionTabl
 			log.String("sql", sql))
 	}
 
-	ins.logger.Info("create dimension table",
+	ins.logger.Debug("create dimension table",
 		log.String("table", t.Name), log.String("dim", dim.Name))
 
 	return nil
@@ -2273,7 +2286,7 @@ func (ins *Instance) addValueColumn(t *TimeSeriesTable, c *Column, agg int) erro
 	}
 
 	if agg == 0 {
-		ins.logger.Info("add value column",
+		ins.logger.Debug("add value column",
 			log.String("table", t.Name),
 			log.Int("agg", agg),
 			log.String("column", c.Name))
@@ -2295,7 +2308,7 @@ func (ins *Instance) addDimensionColumn(t *TimeSeriesTable, c *Column, agg int) 
 	}
 
 	if agg == 0 {
-		ins.logger.Info("add tag column",
+		ins.logger.Debug("add tag column",
 			log.String("table", t.Name),
 			log.Int("agg", agg),
 			log.String("column", c.Name))
@@ -2420,7 +2433,11 @@ func (t *TimeSeriesTable) genCreateFactTableSql(agg int, dbtype string) string {
 	}
 
 	for k := range t.FactTable.ValueMap {
-		columns += fmt.Sprintf("value_%s REAL DEFAULT NULL, ", k)
+		if dbtype == "SQLITE" {
+			columns += fmt.Sprintf("value_%s REAL DEFAULT NULL, ", k)
+		} else {
+			columns += fmt.Sprintf("value_%s DOUBLE PRECISION DEFAULT NULL, ", k)
+		}
 	}
 
 	var name string
@@ -2562,8 +2579,12 @@ func (t *TimeSeriesTable) genAddColumnSql(dbType string, prefix string, c *Colum
 		return fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s%s %s DEFAULT NULL",
 			name, prefix, c.Name, c.Type)
 	} else {
+		pgtype := c.Type
+		if c.Type == "REAL" {
+			pgtype = "DOUBLE PRECISION"
+		}
 		return fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s%s %s DEFAULT NULL",
-			name, prefix, c.Name, c.Type)
+			name, prefix, c.Name, pgtype)
 	}
 }
 

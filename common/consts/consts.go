@@ -172,13 +172,14 @@ const (
 	CloudESSD = "cloud_essd"
 	CloudSSD  = "cloud_ssd"
 
-	ProcMemInfo       = "/proc/meminfo"
-	ProcCpuStat       = "/proc/stat"
-	ProcLoadAvg       = "/proc/loadavg"
-	EtcMTab           = "/etc/mtab"
-	ProcNetDev        = "/proc/net/dev"
-	ProcMountInfo     = "/proc/self/mountinfo"
-	ProcDiskStat      = "/proc/diskstats"
+	ProcMemInfo   = "/proc/meminfo"
+	ProcCpuStat   = "/proc/stat"
+	ProcLoadAvg   = "/proc/loadavg"
+	EtcMTab       = "/etc/mtab"
+	ProcNetDev    = "/proc/net/dev"
+	ProcMountInfo = "/proc/self/mountinfo"
+	ProcDiskStat  = "/proc/diskstats"
+
 	ProcNetSockStat   = "/proc/net/sockstat"
 	ProcNetStat       = "/proc/net/netstat"
 	ProcNetSnmp       = "/proc/net/snmp"
@@ -186,15 +187,15 @@ const (
 	ProcNvmeStatFile  = "/proc/nvmestats/stat"
 	ProcNvmeQueueStat = "/proc/nvmestats/queue_stat"
 	ProcfsJbd         = "/proc/fs/jbd2"
-
-	CPUStatColNum    = 10
-	DiskIostatColNum = 22
-	DiskNum          = 512
-	NetDevNum        = 64
-	NetExtStatColNum = 128
-	NetSnmpColNum    = 32
-	NetDevColNum     = 24
-	PartitionNum     = 32
+	ProcDevice        = "/proc/devices"
+	CPUStatColNum     = 10
+	DiskIostatColNum  = 22
+	DiskNum           = 512
+	NetDevNum         = 64
+	NetExtStatColNum  = 128
+	NetSnmpColNum     = 32
+	NetDevColNum      = 24
+	PartitionNum      = 32
 
 	AligroupLabel = "/etc/optimize.d/autorun/aligroup"
 	Aliyun        = "aliyun"

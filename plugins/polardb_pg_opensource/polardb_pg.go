@@ -74,7 +74,14 @@ func PluginRun(ctx interface{}, param interface{}) error {
 		for k, v := range out {
 			res[k] = v
 		}
-		service.GetPolarDBPgService().Set(collector.HostInsIdStr, res)
+
+		if len(collector.HostInsIdStrList) > 0 {
+			for _, id := range collector.HostInsIdStrList {
+				service.GetPolarDBPgService().Set(id, res)
+			}
+		} else {
+			service.GetPolarDBPgService().Set(collector.HostInsIdStr, res)
+		}
 	}
 
 	return err

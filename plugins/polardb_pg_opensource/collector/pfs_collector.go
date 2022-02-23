@@ -109,12 +109,16 @@ func (p *PfsCollector) Init(m map[string]interface{}, logger *logger.PluginLogge
 
 func (p *PfsCollector) collectloop() {
 	usageTimer := time.NewTimer(PFSUsageCollectInterval * time.Second)
+	ioTimer := time.NewTimer(PFSIOCollectInterval * time.Second)
 	diskInfoTimer := time.NewTimer(PFSDiskInfoCollectInterval * time.Second)
 
 	p.logger.Info("pfs collect loop start")
 
 	p.collectPfsDiskInfo()
 	p.collectPfsDiskUsage()
+	if p.Environment == "public_cloud" {
+		p.collectPfsDiskIO()
+	}
 
 	for {
 		select {
@@ -125,6 +129,12 @@ func (p *PfsCollector) collectloop() {
 			p.logger.Debug("pfs usage collect loop")
 			p.collectPfsDiskUsage()
 			usageTimer.Reset(PFSUsageCollectInterval * time.Second)
+		case <-ioTimer.C:
+			if p.Environment == "public_cloud" {
+				p.logger.Debug("pfs io info collect loop")
+				p.collectPfsDiskIO()
+			}
+			ioTimer.Reset(PFSIOCollectInterval * time.Second)
 		case <-diskInfoTimer.C:
 			p.logger.Debug("pfs disk info collect loop")
 			p.collectPfsDiskInfo()
@@ -171,6 +181,67 @@ func (p *PfsCollector) collectPfsDiskUsage() error {
 			size, _ := strconv.ParseUint(dirsize[0], 10, 64)
 			// turn to MB
 			p.pbdInfo.pfsUsageInfoMap.Store("pls_"+dirname+"_dir_size", size/1024)
+		}
+	}
+
+	return nil
+}
+
+func (p *PfsCollector) collectPfsDiskIO() error {
+	var res string
+	var err error
+
+	// pfs iostat
+	pfsMagicNum := "4294967292"
+	plsadminCmd := fmt.Sprintf("plsadmin iostat %s-3-%s-1", pfsMagicNum, p.pbdInfo.pbdNum)
+
+	if res, err = p.ExecCommand(plsadminCmd); err != nil {
+		p.logger.Error("exec plsadmin failed", err, log.String("command", plsadminCmd))
+		return err
+	} else {
+		var iopsR, iopsW, iops float64
+		var ioThroughputR, ioThroughputW, ioThroughput float64
+		var ioUtil float64
+		var avgQueueSize float64
+		var ioLatencyR, ioLatencyW float64
+		var found bool
+
+		found = false
+		for _, line := range strings.Split(res, "\n") {
+			if strings.HasPrefix(line, pfsMagicNum) {
+
+				items := strings.Fields(line)
+
+				iopsR = ParseFloat(items[1])
+				iopsW = ParseFloat(items[2])
+				iops = iopsR + iopsW
+				// unit: MB
+				ioThroughputR = ParseFloat(items[3])
+				ioThroughputW = ParseFloat(items[4])
+				ioThroughput = ioThroughputR + ioThroughputW
+				ioLatencyR = ParseFloat(items[8])
+				ioLatencyW = ParseFloat(items[9])
+				ioUtil = ParseFloat(strings.TrimSuffix(items[10], "%"))
+
+				found = true
+
+				break
+			}
+		}
+
+		if found {
+			p.pbdInfo.pfsIOInfoMap.Store("pls_iops_read", iopsR)
+			p.pbdInfo.pfsIOInfoMap.Store("pls_iops_write", iopsW)
+			p.pbdInfo.pfsIOInfoMap.Store("pls_iops", iops)
+			p.pbdInfo.pfsIOInfoMap.Store("pls_throughput_read", ioThroughputR)
+			p.pbdInfo.pfsIOInfoMap.Store("pls_throughput_write", ioThroughputW)
+			p.pbdInfo.pfsIOInfoMap.Store("pls_throughput", ioThroughput)
+			p.pbdInfo.pfsIOInfoMap.Store("pls_latency_read", ioLatencyR)
+			p.pbdInfo.pfsIOInfoMap.Store("pls_latency_write", ioLatencyW)
+			p.pbdInfo.pfsIOInfoMap.Store("pls_queue_size", avgQueueSize)
+			p.pbdInfo.pfsIOInfoMap.Store("pls_ioutil", ioUtil)
+		} else {
+			p.logger.Info("invalid result of plsadmin iostat", log.String("detail", string(res)))
 		}
 	}
 
@@ -235,7 +306,9 @@ func (p *PfsCollector) parseInode(fields []string) error {
 
 	p.pbdInfo.pfsDiskInfoMap.Store("pls_inode_total", inodeTotal)
 	p.pbdInfo.pfsDiskInfoMap.Store("pls_inode_used", inodeUsed)
-	p.pbdInfo.pfsDiskInfoMap.Store("pls_inode_usage", uint64(inodeUsed*100/inodeTotal))
+    if inodeTotal > 0 {
+	    p.pbdInfo.pfsDiskInfoMap.Store("pls_inode_usage", float64(inodeUsed*100)/float64(inodeTotal))
+    }
 
 	return err
 }
@@ -249,7 +322,9 @@ func (p *PfsCollector) parseDirentry(fields []string) error {
 
 	p.pbdInfo.pfsDiskInfoMap.Store("pls_direntry_total", direntryTotal)
 	p.pbdInfo.pfsDiskInfoMap.Store("pls_direntry_used", direntryUsed)
-	p.pbdInfo.pfsDiskInfoMap.Store("pls_direntry_usage", uint64(direntryUsed*100/direntryTotal))
+    if direntryTotal > 0 {
+	    p.pbdInfo.pfsDiskInfoMap.Store("pls_direntry_usage", float64(direntryUsed*100)/float64(direntryTotal))
+    }
 
 	return nil
 }
@@ -272,11 +347,13 @@ func (p *PfsCollector) parseBlktag(fields []string) error {
 	// 4MB on each block, and meta data 4MB on 1st block of each chunk, .pfs-paxos: 4MB, .pfs-journal: 1024MB
 	// totalUsedSize := blkUsed*4 - nchild*4 - 4 - 1024
 	// 10G in each chunk
-	totalUsedSize := uint64(float64(nchild*10*1024*1024) * (float64(blkUsed) / float64(blkTotal)))
-	p.pbdInfo.pfsDiskInfoMap.Store("pls_user_data_size", totalUsedSize)
 	p.pbdInfo.pfsDiskInfoMap.Store("pls_blk_total", blkTotal)
 	p.pbdInfo.pfsDiskInfoMap.Store("pls_blk_used", blkUsed)
-	p.pbdInfo.pfsDiskInfoMap.Store("pls_blk_usage", uint64(blkUsed*100/blkTotal))
+    if blkTotal > 0 {
+	    totalUsedSize := uint64(float64(nchild*10*1024*1024) * (float64(blkUsed) / float64(blkTotal)))
+	    p.pbdInfo.pfsDiskInfoMap.Store("pls_user_data_size", totalUsedSize)
+	    p.pbdInfo.pfsDiskInfoMap.Store("pls_blk_usage", float64(blkUsed*100)/float64(blkTotal))
+    }
 	return nil
 }
 
@@ -320,7 +397,16 @@ func (p *PfsCollector) collectPfsDiskInfo() error {
 
 func (p *PfsCollector) collectPfsUsageResult(out map[string]interface{}) error {
 	rangeFunc := func(key, value interface{}) bool {
-		out[key.(string)] = value.(uint64)
+		if intv, ok := value.(uint64); ok {
+			out[key.(string)] = intv
+			return true
+		}
+
+		if floatv, ok := value.(float64); ok {
+			out[key.(string)] = floatv
+			return true
+		}
+
 		return true
 	}
 
@@ -330,7 +416,16 @@ func (p *PfsCollector) collectPfsUsageResult(out map[string]interface{}) error {
 
 func (p *PfsCollector) collectPfsIOResult(out map[string]interface{}) error {
 	rangeFunc := func(key, value interface{}) bool {
-		out[key.(string)] = value.(uint64)
+		if intv, ok := value.(uint64); ok {
+			out[key.(string)] = intv
+			return true
+		}
+
+		if floatv, ok := value.(float64); ok {
+			out[key.(string)] = floatv
+			return true
+		}
+
 		return true
 	}
 
@@ -340,7 +435,16 @@ func (p *PfsCollector) collectPfsIOResult(out map[string]interface{}) error {
 
 func (p *PfsCollector) collectPfsDiskResult(out map[string]interface{}) error {
 	rangeFunc := func(key, value interface{}) bool {
-		out[key.(string)] = value.(uint64)
+		if intv, ok := value.(uint64); ok {
+			out[key.(string)] = intv
+			return true
+		}
+
+		if floatv, ok := value.(float64); ok {
+			out[key.(string)] = floatv
+			return true
+		}
+
 		return true
 	}
 
@@ -366,7 +470,7 @@ func (p *PfsCollector) collectPfsFormalizeResult(out map[string]interface{}) err
 		if _, ok := out[blk_key]; ok {
 			if formalize_size_list[i] == "fs_size_usage" {
 				out[formalize_blk_list[i]] = out[blk_key]
-				out[formalize_size_list[i]] = out[blk_key].(uint64)
+				out[formalize_size_list[i]] = out[blk_key]
 			} else {
 				out[formalize_blk_list[i]] = out[blk_key]
 				// 4MB per block on pfs

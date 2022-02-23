@@ -31,6 +31,7 @@ import (
 
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/config"
 )
 
 var g_HostIP string
@@ -47,7 +48,7 @@ func (runner *Runner) buildBackendCtxMap(
 	backCtxMap["logical_ins_name"] = ins.env["logical_ins_name"]
 	backCtxMap["physical_ins_name"] = ins.env["physical_ins_name"]
 	backCtxMap["backend_hostname"] = collectHeaderMap[consts.SchemaHeaderHostname].(string)
-	backCtxMap["backend_host"] = getHostIP()
+	backCtxMap["backend_host"] = runner.getHostIP()
 	backCtxMap["backend_port"] = collectHeaderMap[consts.SchemaHeaderPort].(string)
 	backCtxMap["time"] = collectStartTime
 	// normalization for plugin name
@@ -58,6 +59,10 @@ func (runner *Runner) buildBackendCtxMap(
 	}
 	if datatype, ok := DatatypeFormalizeMap[backCtxMap["plugin"].(string)]; ok {
 		backCtxMap["datatype"] = datatype
+		if datatype == "host" {
+			backCtxMap["logical_ins_name"] = runner.getHostIP()
+			backCtxMap["physical_ins_name"] = runner.getHostIP()
+		}
 	} else {
 		backCtxMap["datatype"] = backCtxMap["plugin"].(string)
 	}
@@ -117,6 +122,11 @@ func (runner *Runner) runProcessorBackends(
 		}
 
 		backCtxMap["processor"] = backCtxMap["backend"]
+
+		if separator, ok := runner.externConf.Context["line_separator"].(string); ok {
+			backCtxMap["line_separator"] = separator
+		}
+
 		runner.buildBackendCtxMap(backCtxMap, collectHeaderMap, collectContentMap,
 			collectStartTime, ins)
 		err = backRun(backCtxMap, processContent)
@@ -237,40 +247,75 @@ func (runner *Runner) exitProcessorBackends(initCtx interface{}, ins *Instance) 
 	return nil
 }
 
-func getHostIP() string {
+func (runner *Runner) getHostIP() string {
 	if g_HostIP != "" {
 		return g_HostIP
 	}
 
+	var loopback *net.IPNet
+	loopback = nil
+
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		return ""
+		return g_HostIP
 	}
+
+	cidr, err := config.GetDatabaseCIDR()
+	if err != nil {
+		log.Warn("[runner] no ip addr resolved", log.String("err", err.Error()))
+	}
+
 	for _, address := range addrs {
 		// check the address type and if it is not a loopback the display it
-		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-			if ipnet.IP.To4() != nil {
-				g_HostIP = ipnet.IP.String()
-				return g_HostIP
+		if ipnet, ok := address.(*net.IPNet); ok {
+			if cidr == nil {
+				if ipnet.IP.IsLoopback() {
+					loopback = ipnet
+					continue
+				}
+				if ipnet.IP.To4() != nil {
+					log.Info("[runner] init ip use the first addr",
+						log.String("ip", ipnet.IP.String()))
+					g_HostIP = ipnet.IP.String()
+					return g_HostIP
+				}
+			} else {
+				if err == nil && cidr.Contains(ipnet.IP) {
+					log.Info("[runner] init ip according to cidr",
+						log.String("ip", ipnet.IP.String()))
+					g_HostIP = ipnet.IP.String()
+					return g_HostIP
+				} else {
+					g_HostIP = ipnet.IP.String()
+					return g_HostIP
+				}
 			}
 		}
 	}
-	return ""
+
+	if loopback != nil {
+		g_HostIP = loopback.IP.String()
+		return g_HostIP
+	}
+
+	log.Info("[runner] init ip without matching cidr",
+		log.String("ip", g_HostIP))
+	return g_HostIP
 }
 
 func init() {
 	PluginNameFormalizeMap = map[string]string{
-		"golang-collector-polardb_pg":                     "polardb_pg_collector",
-		"golang-collector-polardb_pg_k8s":                     "polardb_pg_collector",
-		"golang-collector-polardb_pg_opensource_refactor": "polardb_pg_collector",
-		"golang-collector-polarbox_oracle_perf":           "polardb_pg_collector",
-		"golang-collector-polardb_pg_multidimension":      "polardb_pg_multidimension_collector",
-		"golang-collector-polardb_pg_multidimension_k8s":      "polardb_pg_multidimension_collector",
-		"golang-collector-polarbox-maxscale-perf":         "maxscale_perf",
-		"golang-collector-sar":                            "sar",
-		"golang-collector-cluster-manager-eventlog":       "cluster_manager_eventlog",
-		"golang-collector-polardb_pg_errorlog":            "polardb_pg_errlog",
-		"golang-collector-polarbox_oracle_errorlog":       "polardb_pg_errlog",
+		"golang-collector-polardb_pg":                    "polardb_pg_collector",
+		"golang-collector-polardb_pg_k8s":                "polardb_pg_collector",
+		"golang-collector-polardb_pg_opensource":         "polardb_pg_collector",
+		"golang-collector-polarbox_oracle_perf":          "polardb_pg_collector",
+		"golang-collector-polardb_pg_multidimension":     "polardb_pg_multidimension_collector",
+		"golang-collector-polardb_pg_multidimension_k8s": "polardb_pg_multidimension_collector",
+		"golang-collector-polarbox-maxscale-perf":        "maxscale_perf",
+		"golang-collector-sar":                           "sar",
+		"golang-collector-cluster-manager-eventlog":      "cluster_manager_eventlog",
+		"golang-collector-polardb_pg_errorlog":           "polardb_pg_errlog",
+		"golang-collector-polarbox_oracle_errorlog":      "polardb_pg_errlog",
 	}
 
 	DatatypeFormalizeMap = map[string]string{

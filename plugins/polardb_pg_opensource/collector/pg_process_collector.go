@@ -61,22 +61,26 @@ var BackendTypeMap = map[string]string{
 }
 
 type PgProcessResource struct {
-	BackendType       string
-	State             string
-	CpuUser           uint64
-	CpuSys            uint64
-	Rss               uint64
-	ReadIOCount       uint64
-	WriteIOCount      uint64
-	ReadIOThroughput  uint64
-	WriteIOThroughput uint64
+	BackendType          string
+	State                string
+	CpuUser              uint64
+	CpuSys               uint64
+	Rss                  uint64
+	ReadIOCount          uint64
+	WriteIOCount         uint64
+	ReadIOThroughput     uint64
+	WriteIOThroughput    uint64
+	BlockReadThroughput  uint64
+	BlockWriteThroughput uint64
 
-	CpuUserDelta           uint64
-	CpuSysDelta            uint64
-	ReadIOCountDelta       uint64
-	WriteIOCountDelta      uint64
-	ReadIOThroughputDelta  uint64
-	WriteIOThroughputDelta uint64
+	CpuUserDelta              float64
+	CpuSysDelta               float64
+	ReadIOCountDelta          float64
+	WriteIOCountDelta         float64
+	ReadIOThroughputDelta     float64
+	WriteIOThroughputDelta    float64
+	BlockReadThroughputDelta  float64
+	BlockWriteThroughputDelta float64
 
 	Count uint64
 }
@@ -89,7 +93,7 @@ type PgProcessResourceCollector struct {
 	processes         map[string]*PgProcessResource
 	cgroup_tasks_path string
 	cpuCoreNumber     float64
-	intervalNano      uint64
+	intervalNano      int64
 	postmaster_pid    int64
 	datadir           string
 	prefix            *regexp.Regexp
@@ -99,8 +103,8 @@ type PgProcessResourceCollector struct {
 func NewPgProcessResourceCollector() *PgProcessResourceCollector {
 	p := &PgProcessResourceCollector{}
 	p.processes = make(map[string]*PgProcessResource)
-	p.buf = make([]byte, 4096)
-	p.lbuf = make([]byte, 4096)
+	p.buf = make([]byte, 100*4096)
+	p.lbuf = make([]byte, 100*4096)
 	return p
 }
 
@@ -152,9 +156,10 @@ func (p *PgProcessResourceCollector) Stop() error {
 	return nil
 }
 
-func (p *PgProcessResourceCollector) Collect(out map[string]interface{}) error {
+func (p *PgProcessResourceCollector) Collect(out map[string]interface{}, interval int64) error {
 	var buf []byte
 	p.count += 1
+	p.intervalNano = interval
 
 	if p.postmaster_pid == int64(0) {
 		tasksfd, err := os.Open(p.cgroup_tasks_path)
@@ -245,19 +250,24 @@ func (p *PgProcessResourceCollector) mergePgProcessResource(
 
 	// CPU计算百分比乘以100
 	nanoSecondsPerTickWithPercent := nanoSecondsPerTick * 100
+	floatInterval := float64(p.intervalNano)
 
 	x.CpuUserDelta =
-		(y.CpuUser - x.CpuUser) * nanoSecondsPerTickWithPercent / p.intervalNano
+		float64((y.CpuUser-x.CpuUser)*nanoSecondsPerTickWithPercent) / floatInterval
 	x.CpuSysDelta =
-		(y.CpuSys - x.CpuSys) * nanoSecondsPerTickWithPercent / p.intervalNano
+		float64((y.CpuSys-x.CpuSys)*nanoSecondsPerTickWithPercent) / floatInterval
 	x.ReadIOCountDelta =
-		(y.ReadIOCount - x.ReadIOCount) * nanoSecondsPerTickWithPercent / p.intervalNano
+		float64(y.ReadIOCount-x.ReadIOCount) / floatInterval
 	x.WriteIOCountDelta =
-		(y.WriteIOCount - x.WriteIOCount) * nanoSecondsPerTickWithPercent / p.intervalNano
+		float64(y.WriteIOCount-x.WriteIOCount) / floatInterval
 	x.ReadIOThroughputDelta =
-		(y.ReadIOThroughput - x.ReadIOThroughput) * nanoSecondsPerTickWithPercent / p.intervalNano
+		float64(y.ReadIOThroughput-x.ReadIOThroughput) / 1024 / 1024 / floatInterval
 	x.WriteIOThroughputDelta =
-		(y.WriteIOThroughput - x.WriteIOThroughput) * nanoSecondsPerTickWithPercent / p.intervalNano
+		float64(y.WriteIOThroughput-x.WriteIOThroughput) / 1024 / 1024 / floatInterval
+	x.BlockReadThroughputDelta =
+		float64(y.BlockReadThroughput-x.BlockReadThroughput) / 1024 / 1024 / floatInterval
+	x.BlockWriteThroughputDelta =
+		float64(y.BlockWriteThroughput-x.BlockWriteThroughput) / 1024 / 1024 / floatInterval
 	x.Rss = y.Rss
 
 	x.CpuUser = y.CpuUser
@@ -266,6 +276,9 @@ func (p *PgProcessResourceCollector) mergePgProcessResource(
 	x.WriteIOCount = y.WriteIOCount
 	x.ReadIOThroughput = y.ReadIOThroughput
 	x.WriteIOThroughput = y.WriteIOThroughput
+	x.BlockReadThroughput = y.BlockReadThroughput
+	x.BlockWriteThroughput = y.BlockWriteThroughput
+
 	x.Count = y.Count
 
 	return true
@@ -424,7 +437,7 @@ func (p *PgProcessResourceCollector) getMemInfo(pid string, r *PgProcessResource
 		return err
 	}
 
-	r.Rss = (rss - shared) * 4096 / 1024 / 1024
+	r.Rss = (rss - shared) * 4096
 	return nil
 }
 
@@ -470,13 +483,17 @@ func (p *PgProcessResourceCollector) getIoInfo(pid string, r *PgProcessResource)
 
 		switch string(fields[0]) {
 		case "rchar:":
-			r.ReadIOThroughput = x / 1024 / 1024
+			r.ReadIOThroughput = x
 		case "wchar:":
-			r.WriteIOThroughput = x / 1024 / 1024
+			r.WriteIOThroughput = x
 		case "syscr:":
 			r.ReadIOCount = x
 		case "syscw:":
 			r.WriteIOCount = x
+		case "read_bytes":
+			r.BlockReadThroughput = x
+		case "write_bytes":
+			r.BlockWriteThroughput = x
 		}
 	}
 
@@ -491,7 +508,7 @@ func (p *PgProcessResourceCollector) buildResult(out map[string]interface{}) err
 	}
 
 	p.logger.Debug("process_cpu_info", log.Float64("cpuCores", cpuCores))
-	cpuBackends := make(map[string]int)
+	// cpuBackends := make(map[string]int)
 
 	for _, v := range p.processes {
 		if v.Count != p.count {
@@ -500,73 +517,102 @@ func (p *PgProcessResourceCollector) buildResult(out map[string]interface{}) err
 
 		// 1. summary
 		if x, ok := out["procs_cpu_user_sum"]; ok {
-			out["procs_cpu_user_sum"] = x.(uint64) + v.CpuUserDelta
+			out["procs_cpu_user_sum"] = x.(float64) + v.CpuUserDelta
 		} else {
 			out["procs_cpu_user_sum"] = v.CpuUserDelta
 		}
 
 		if x, ok := out["procs_cpu_sys_sum"]; ok {
-			out["procs_cpu_sys_sum"] = x.(uint64) + v.CpuSysDelta
+			out["procs_cpu_sys_sum"] = x.(float64) + v.CpuSysDelta
 		} else {
 			out["procs_cpu_sys_sum"] = v.CpuSysDelta
 		}
 
 		if x, ok := out["procs_mem_rss_sum"]; ok {
-			out["procs_mem_rss_sum"] = x.(uint64) + v.Rss
+			out["procs_mem_rss_sum"] = (x.(float64) + float64(v.Rss)) / 1024 / 1024
 		} else {
-			out["procs_mem_rss_sum"] = v.Rss
+			out["procs_mem_rss_sum"] = float64(v.Rss) / 1024 / 1024
 		}
 
-		if x, ok := out["procs_read_iops_sum"]; ok {
-			out["procs_read_iops_sum"] = x.(uint64) + v.ReadIOCountDelta
-			out["procs_write_iops_sum"] = x.(uint64) + v.WriteIOCountDelta
-			out["procs_read_iothroughput_sum"] = x.(uint64) + v.ReadIOThroughputDelta
-			out["procs_write_iothroughput_sum"] = x.(uint64) + v.WriteIOThroughputDelta
+		if x, ok := out["procs_read_count_sum"]; ok {
+			out["procs_read_count_sum"] = x.(float64) + v.ReadIOCountDelta
 		} else {
-			out["procs_read_iops_sum"] = v.ReadIOCountDelta
-			out["procs_write_iops_sum"] = v.WriteIOCountDelta
-			out["procs_read_iothroughput_sum"] = v.ReadIOThroughputDelta
-			out["procs_write_iothroughput_sum"] = v.WriteIOThroughputDelta
+			out["procs_read_count_sum"] = v.ReadIOCountDelta
+		}
+
+		if x, ok := out["procs_write_count_sum"]; ok {
+			out["procs_write_count_sum"] = x.(float64) + v.WriteIOCountDelta
+		} else {
+			out["procs_write_count_sum"] = v.WriteIOCountDelta
+		}
+
+		if x, ok := out["procs_read_mb_sum"]; ok {
+			out["procs_read_mb_sum"] = x.(float64) + v.ReadIOThroughputDelta
+		} else {
+			out["procs_read_mb_sum"] = v.ReadIOThroughputDelta
+		}
+
+		if x, ok := out["procs_write_mb_sum"]; ok {
+			out["procs_write_mb_sum"] = x.(float64) + v.WriteIOThroughputDelta
+		} else {
+			out["procs_write_mb_sum"] = v.WriteIOThroughputDelta
+		}
+
+		if x, ok := out["procs_blkdev_read_mb_sum"]; ok {
+			out["procs_blkdev_read_mb_sum"] = x.(float64) + v.BlockReadThroughputDelta
+		} else {
+			out["procs_blkdev_read_mb_sum"] = v.BlockReadThroughputDelta
+		}
+
+		if x, ok := out["procs_blkdev_write_mb_sum"]; ok {
+			out["procs_blkdev_write_mb_sum"] = x.(float64) + v.BlockWriteThroughputDelta
+		} else {
+			out["procs_blkdev_write_mb_sum"] = v.BlockWriteThroughputDelta
 		}
 
 		// 2. every backend type
 		if x, ok := out[v.BackendType+"_cpu"]; ok {
-			out[v.BackendType+"_cpu"] = x.(uint64) + v.CpuUserDelta+v.CpuSysDelta
+			out[v.BackendType+"_cpu"] = x.(float64) + v.CpuUserDelta + v.CpuSysDelta
 		} else {
-			cpuBackends[v.BackendType + "_cpu"] = 1
-			out[v.BackendType+"_cpu"] = v.CpuUserDelta+v.CpuSysDelta
+			// cpuBackends[v.BackendType+"_cpu"] = 1
+			out[v.BackendType+"_cpu"] = v.CpuUserDelta + v.CpuSysDelta
 		}
 
 		if x, ok := out[v.BackendType+"_mem"]; ok {
-			out[v.BackendType+"_mem"] = x.(uint64) + v.Rss
+			out[v.BackendType+"_mem"] = (x.(float64) + float64(v.Rss)) / 1024 / 1024
 		} else {
-			out[v.BackendType+"_mem"] = v.Rss
+			out[v.BackendType+"_mem"] = float64(v.Rss) / 1024 / 1024
 		}
 
 		if x, ok := out[v.BackendType+"_iops"]; ok {
-			out[v.BackendType+"_iops"] = x.(uint64) + v.ReadIOCountDelta + v.WriteIOCountDelta
+			out[v.BackendType+"_iops"] = x.(float64) + v.ReadIOCountDelta + v.WriteIOCountDelta
 		} else {
 			out[v.BackendType+"_iops"] = v.ReadIOCountDelta + v.WriteIOCountDelta
 		}
 
 		if x, ok := out[v.BackendType+"_iothroughput"]; ok {
-			out[v.BackendType+"_iothroughput"] =
-				x.(uint64) + v.ReadIOThroughputDelta + v.WriteIOThroughputDelta
+			out[v.BackendType+"_iothroughput"] = x.(float64) + v.ReadIOThroughputDelta + v.WriteIOThroughputDelta
 		} else {
 			out[v.BackendType+"_iothroughput"] = v.ReadIOThroughputDelta + v.WriteIOThroughputDelta
 		}
 
+		// 3. process counts
+		if x, ok := out[v.BackendType+"_num"]; ok {
+			out[v.BackendType+"_num"] = x.(uint64) + 1
+		} else {
+			out[v.BackendType+"_num"] = uint64(1)
+		}
 	}
 
 	// cpu normalize
-	if _, ok := out["procs_cpu_user_sum"]; ok {
-		out["procs_cpu_user_sum"] = uint64(float64(out["procs_cpu_user_sum"].(uint64)) / cpuCores)
-		out["procs_cpu_sys_sum"] = uint64(float64(out["procs_cpu_sys_sum"].(uint64)) / cpuCores)
-	}
+	// if _, ok := out["procs_cpu_user_sum"]; ok {
+	// 	out["procs_cpu_user_sum"] = uint64(float64(out["procs_cpu_user_sum"].(uint64)) / cpuCores)
+	// 	out["procs_cpu_sys_sum"] = uint64(float64(out["procs_cpu_sys_sum"].(uint64)) / cpuCores)
+	// }
 
-	for k := range cpuBackends {
-		out[k] = uint64(float64(out[k].(uint64)) / cpuCores)
-	}
+	// for k := range cpuBackends {
+	// 	out[k] = uint64(float64(out[k].(uint64)) / cpuCores)
+	// }
 
 	return nil
 }
@@ -597,4 +643,3 @@ func (p *PgProcessResourceCollector) getPostmasterPid() (int64, error) {
 
 	return pid, nil
 }
-

@@ -385,6 +385,9 @@ func (runner *Runner) initSingleBackendModule(backendname string) error {
 	if moduleInfoBackend, ok = backend.(*ModuleInfo); !ok {
 		return fmt.Errorf("module info backend not found:%s", backendname)
 	}
+	if _, ok = moduleInfoBackend.Contexts.Load(backend); ok {
+		return nil
+	}
 	ctx[consts.PluginExternKey] = moduleInfoBackend.Extern
 	// db_type
 	ctx[consts.PluginDBTypeKey] = runner.pInfo.DbType
@@ -832,8 +835,22 @@ func (runner *Runner) runLogModule(
 	packetID := uint64(0)
 	backCtxes := make(map[string]interface{})
 	backRunMap := make(map[string]func(interface{}, interface{}) error)
+	collectHeaderMap := make(map[string]interface{}, 15)
 	collectContentMap := make(map[string]interface{}, 32)
-	for _, backend := range runner.pInfo.Backend {
+
+	// NOTE(wormhole.gl): init backends include all backends
+	initBackends := make([]string, 0, len(runner.pInfo.Backend))
+	initBackends = append(initBackends, runner.pInfo.Backend...)
+
+	if runner.pInfo.ProcessorBackends != nil && len(runner.pInfo.ProcessorBackends) > 0 {
+		if runner.pInfo.Processor != "" {
+			initBackends = append(initBackends, runner.pInfo.Processor)
+		}
+
+		initBackends = append(initBackends, runner.pInfo.ProcessorBackends...)
+	}
+
+	for _, backend := range initBackends {
 		module, ok := runner.mInfoMap.Load(backend)
 		if !ok {
 			return fmt.Errorf("backend:%s module not found,plugin:%s", backend, ins.pInfo.Name)
@@ -860,17 +877,18 @@ func (runner *Runner) runLogModule(
 		backCtxes[backend] = backCtxMap
 		backRunMap[backend] = backendRun
 	}
-	// var encoder *zstd.Encoder
-	// var zstdBuffer []byte
-	// if ins.pInfo.BizType == "aligroup" && strings.Contains(ins.pInfo.Name, "auditlog") {
-	// 	encoder, err = zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
-	// 	if err != nil {
-	// 		log.Error("[runnner] zstd create writer failed", log.String("err", err.Error()), log.String("module", ins.pInfo.Name), log.Int("port", ins.port))
-	// 		return fmt.Errorf("zstd create writer failed,err:%+v", err.Error())
-	// 	}
-	// 	defer encoder.Close()
-	// }
-
+	//	var encoder *zstd.Encoder
+	//	var zstdBuffer []byte
+	//	if ins.pInfo.BizType == "aligroup" && strings.Contains(ins.pInfo.Name, "auditlog") {
+	//		encoder, err = zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+	//		if err != nil {
+	//			log.Error("[runnner] zstd create writer failed", log.String("err", err.Error()), log.String("module", ins.pInfo.Name), log.Int("port", ins.port))
+	//			return fmt.Errorf("zstd create writer failed,err:%+v", err.Error())
+	//		}
+	//		defer encoder.Close()
+	//	}
+	//
+	generateFixedMessageHeaderEntity(runner.schema, runner.pInfo.DbType, runner.externConf.Business, collectHeaderMap, ins)
 	mainRun := ins.mInfo.PluginABI.Run
 	interval := ins.pInfo.Interval
 	for {
@@ -891,6 +909,9 @@ func (runner *Runner) runLogModule(
 		for key := range collectContentMap {
 			delete(collectContentMap, key)
 		}
+		//
+		collectHeaderMap[consts.SchemaHeaderInsName] = ins.insName
+		collectContentMap[consts.SchemaHeaderInsName] = ins.insName
 
 		// 2. invoke PluginRun in plugin.so
 		runError := mainRun(initCtx, collectContentMap)
@@ -941,16 +962,24 @@ func (runner *Runner) runLogModule(
 		}
 
 		if ins.pInfo.BizType == "aligroup" && strings.Contains(ins.pInfo.Name, "auditlog") {
-			// if zstdBuffer == nil {
-			// 	zstdBuffer = make([]byte, 5242880)
-			// }
-			// tmp := encoder.EncodeAll(content.([]byte), zstdBuffer)
-			// ins.msgBuff.Write(tmp)
-			// zstdBuffer = zstdBuffer[:0]
+			//			if zstdBuffer == nil {
+			//				zstdBuffer = make([]byte, 5242880)
+			//			}
+			//			tmp := encoder.EncodeAll(content.([]byte), zstdBuffer)
+			//			ins.msgBuff.Write(tmp)
+			//			zstdBuffer = zstdBuffer[:0]
 			// encoder.Close()
 		} else {
 			ins.msgBuff.Write(content.([]byte))
 		}
+
+		// NOTE(wormhole.gl): multi backend run
+		if runner.pInfo.ProcessorBackends != nil && len(runner.pInfo.ProcessorBackends) > 0 {
+			generateMutableMessageHeaderEntity(collectStartTime, collectEndTime, elapsedTimeWithin, collectHeaderMap)
+			runner.runProcessorBackends(backCtxes, backRunMap, collectHeaderMap,
+				collectContentMap, collectStartTime, ins)
+		}
+
 		for _, backend := range ins.pInfo.Backend {
 			backRun := backRunMap[backend]
 			backCtx := backCtxes[backend].(map[string]interface{})
