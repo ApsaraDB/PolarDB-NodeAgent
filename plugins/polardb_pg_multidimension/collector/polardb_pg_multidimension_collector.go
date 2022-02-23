@@ -46,16 +46,18 @@ import (
 
 const Splitter = "^^^"
 const (
-	PolarMinReleaseDate          = int64(20190101)
-	MinDBVersion                 = -1 // means no limit
-	MaxDBVersion                 = -1 // means no limit
-	CollectMinDBVersion          = 90200
-	CollectMaxDBVersion          = MaxDBVersion
-	DBConfigCheckVersionInterval = 5
-	DBConnTimeout                = 10
-	DBQueryTimeout               = 60
-	basePath                     = "base_path"
-	KEY_SEND_TO_MULTIBACKEND     = "send_to_multibackend"
+	PolarMinReleaseDate                 = int64(20190101)
+	MinDBVersion                        = -1 // means no limit
+	MaxDBVersion                        = -1 // means no limit
+	CollectMinDBVersion                 = 90200
+	CollectMaxDBVersion                 = MaxDBVersion
+	DBConfigCheckVersionInterval        = 5
+	DBConnTimeout                       = 10
+	DBQueryTimeout                      = 60
+	basePath                            = "base_path"
+	KEY_SEND_TO_MULTIBACKEND            = "send_to_multibackend"
+	DefaultCollectLongIntervalThreshold = 600
+	MIN_TRACKLOG_TIME                   = 500
 )
 
 const (
@@ -64,6 +66,7 @@ const (
 	RO      = 2
 	StandBy = 3
 	DataMax = 4
+	User    = 5
 )
 
 type PolarDBPgMultidimensionCollector struct {
@@ -97,21 +100,24 @@ type CollectorInfo struct {
 	querymap map[string]db_config.QueryCtx
 	// interval               int64
 	// timeNow                time.Time
-	count                  int64
-	dbConfigVersion        int64
-	dbConfigCenterVersion  int64
-	dbConfigNeedUpdate     bool
-	dbSnapshotNo           int64
-	dbNeedSnapshot         bool
-	enableDBConfig         bool
-	enableDBConfigCenter   bool
-	dbConfigCenterHost     string
-	dbConfigCenterPort     int
-	dbConfigCenterUser     string
-	dbConfigCenterPass     string
-	dbConfigCenterDatabase string
-	dbConfigSchema         string
-	commandInfos           []interface{}
+	count                        int64
+	dbConfigVersion              int64
+	dbConfigCenterVersion        int64
+	dbConfigNeedUpdate           bool
+	dbSnapshotNo                 int64
+	dbNeedSnapshot               bool
+	enableDBConfig               bool
+	enableDBConfigReleaseDate    string
+	enableDBConfigCenter         bool
+	dbConfigCenterHost           string
+	dbConfigCenterPort           int
+	dbConfigCenterUser           string
+	dbConfigCenterPass           string
+	dbConfigCenterDatabase       string
+	dbConfigSchema               string
+	commandInfos                 []interface{}
+	longCollectIntervalThreshold int
+	slowCollectionLogThreshold   int64
 }
 
 type DBInfo struct {
@@ -287,6 +293,7 @@ func (c *PolarDBPgMultidimensionCollector) initParams(m map[string]interface{}) 
 	log.Debug("envs", log.String("envs", fmt.Sprintf("%+v", c.Envs)))
 
 	c.cInfo.enableDBConfig = m["enable_dbconfig"].(bool)
+	c.cInfo.enableDBConfigReleaseDate = c.GetMapValue(m, "enable_dbconfig_releasedate", "20211130").(string)
 	c.cInfo.enableDBConfigCenter = c.GetMapValue(m, "enable_dbconfig_center", false).(bool)
 	c.cInfo.dbConfigCenterHost = c.GetMapValue(m, "dbconfig_center_host", "").(string)
 	c.cInfo.dbConfigCenterPort = int(c.GetMapValue(m, "dbconfig_center_port", float64(5432)).(float64))
@@ -294,7 +301,10 @@ func (c *PolarDBPgMultidimensionCollector) initParams(m map[string]interface{}) 
 	c.cInfo.dbConfigCenterPass = c.GetMapValue(m, "dbconfig_center_pass", "").(string)
 	c.cInfo.dbConfigCenterDatabase = c.GetMapValue(m, "dbconfig_center_database", "postgres").(string)
 	c.cInfo.dbConfigSchema = m["dbconfig_schema"].(string)
+	c.cInfo.slowCollectionLogThreshold = int64(c.GetMapValue(m, "slow_collection_log_thres", float64(MIN_TRACKLOG_TIME)).(float64))
 	c.cInfo.commandInfos = c.GetMapValue(m, "commands", make([]interface{}, 0)).([]interface{})
+	c.cInfo.longCollectIntervalThreshold = int(c.GetMapValue(m, "long_collect_interval_threshold",
+		float64(DefaultCollectLongIntervalThreshold)).(float64))
 	if _, ok := c.Envs[consts.PluginContextKeyUserName]; ok {
 		c.dbInfo.username = c.Envs[consts.PluginContextKeyUserName]
 		c.dbInfo.database = c.Envs[consts.PluginContextKeyDatabase]
@@ -364,6 +374,18 @@ func (c *PolarDBPgMultidimensionCollector) initCollctor(m map[string]interface{}
 		}
 
 		c.PolarReleaseDate = strconv.FormatInt(c.dbInfo.releaseDate, 10)
+
+		if c.PolarReleaseDate < c.cInfo.enableDBConfigReleaseDate {
+			c.logger.Info("db config is disabled for this release_date",
+				log.String("polar_release_date", c.PolarReleaseDate),
+				log.String("dbconfig_release_date", c.cInfo.enableDBConfigReleaseDate))
+			c.cInfo.enableDBConfig = false
+		}
+
+		if c.cInfo.enableDBConfig {
+			c.logger.Info("db config is enable for this release_date",
+				log.String("polar_release_date", c.PolarReleaseDate))
+		}
 
 		c.PolarVersion, err = c.getDBVersionString("PolarDB Version", "SHOW polar_version")
 		if err != nil {
@@ -486,14 +508,14 @@ func (c *PolarDBPgMultidimensionCollector) initQueries(queryContexts []interface
 		}
 
 		if queryCtx.Enable == 0 {
-			c.logger.Info("sql is disabled", log.String("query", queryCtx.Query))
+			c.logger.Info("sql is disabled", log.String("name", queryCtx.Name))
 		}
 
 		if queryCtx.MinVersion != MinDBVersion && c.dbInfo.version < queryCtx.MinVersion {
 			c.logger.Info("instance version is too low",
 				log.Int64("conf_version", queryCtx.MinVersion),
 				log.Int64("ins_version", c.dbInfo.version),
-				log.String("query", queryCtx.Query))
+				log.String("name", queryCtx.Name))
 			continue
 		}
 
@@ -501,7 +523,7 @@ func (c *PolarDBPgMultidimensionCollector) initQueries(queryContexts []interface
 			log.Info("instance version is high",
 				log.Int64("conf_version", queryCtx.MaxVersion),
 				log.Int64("ins_version", c.dbInfo.version),
-				log.String("query", queryCtx.Query))
+				log.String("name", queryCtx.Name))
 			continue
 		}
 
@@ -510,17 +532,27 @@ func (c *PolarDBPgMultidimensionCollector) initQueries(queryContexts []interface
 				log.Info("instance release date is older",
 					log.Int64("conf_release_date", queryCtx.PolarReleaseDate),
 					log.Int64("ins_release_date", c.dbInfo.releaseDate),
-					log.String("query", queryCtx.Query))
+					log.String("name", queryCtx.Name))
 				continue
 			}
 		}
 
-		if queryCtx.DBRole != All && queryCtx.DBRole != c.dbInfo.role {
+		if queryCtx.DBRole != All && queryCtx.DBRole != User && queryCtx.DBRole != c.dbInfo.role {
 			c.logger.Info("conf dbrole is not match to instance dbrole",
 				log.Int("conf_role", int(queryCtx.DBRole)),
 				log.Int("ins_role", int(c.dbInfo.role)),
-				log.String("query", queryCtx.Query))
+				log.String("name", queryCtx.Name))
 			queryCtx.Enable = 0
+		}
+
+		if queryCtx.DBRole == User {
+			if !(c.dbInfo.role == RW || c.dbInfo.role == RO) {
+				c.logger.Info("db role is not RW or RO",
+					log.Int("conf_role", int(queryCtx.DBRole)),
+					log.Int("ins_role", int(c.dbInfo.role)),
+					log.String("name", queryCtx.Name))
+				queryCtx.Enable = 0
+			}
 		}
 
 		if c.dbInfo.role == DataMax {
@@ -540,33 +572,35 @@ func (c *PolarDBPgMultidimensionCollector) initQueries(queryContexts []interface
 
 	if c.cInfo.enableDBConfig {
 		var err error
-		if err = c.dbConfig.InitFromDBConfig(c.ConfigMap, c.cInfo.querymap,
-			c.dbInfo.role == RW); err != nil {
-			if c.dbInfo.role != RW {
-				c.cInfo.dbConfigVersion = -1
-				c.logger.Info("we may need to wait for RW init")
-			} else {
-				c.logger.Error("init from db config failed", err)
-				return err
-			}
-		}
-
-		if err == nil && c.dbInfo.role != DataMax {
-			if c.cInfo.dbConfigVersion, err = c.dbConfig.GetDBConfigVersion(); err != nil {
-				c.logger.Error("init from db config version failed", err)
-				return err
-			}
-
-			if c.cInfo.enableDBConfigCenter {
-				if c.cInfo.dbConfigCenterVersion, err =
-					c.dbConfig.GetConfigCenterDBConfigVersion(); err != nil {
-					c.logger.Warn("init from config center db config version failed", err)
+		if c.dbInfo.role != DataMax {
+			if err = c.dbConfig.InitFromDBConfig(c.ConfigMap, c.cInfo.querymap,
+				c.dbInfo.role == RW); err != nil {
+				if c.dbInfo.role != RW {
+					c.cInfo.dbConfigVersion = -1
+					c.logger.Info("we may need to wait for RW init")
+				} else {
+					c.logger.Error("init from db config failed", err)
+					return err
 				}
 			}
 
-			if c.cInfo.dbSnapshotNo, err = c.dbConfig.GetDBSnapshotNo(); err != nil {
-				c.logger.Error("init db snapshot no failed", err)
-				return err
+			if err == nil {
+				if c.cInfo.dbConfigVersion, err = c.dbConfig.GetDBConfigVersion(); err != nil {
+					c.logger.Error("init from db config version failed", err)
+					return err
+				}
+
+				if c.cInfo.enableDBConfigCenter {
+					if c.cInfo.dbConfigCenterVersion, err =
+						c.dbConfig.GetConfigCenterDBConfigVersion(); err != nil {
+						c.logger.Warn("init from config center db config version failed", err)
+					}
+				}
+
+				if c.cInfo.dbSnapshotNo, err = c.dbConfig.GetDBSnapshotNo(); err != nil {
+					c.logger.Error("init db snapshot no failed", err)
+					return err
+				}
 			}
 		}
 
@@ -620,6 +654,11 @@ func (c *PolarDBPgMultidimensionCollector) collectSQL(query db_config.QueryCtx) 
 			log.String("db", dbName),
 			log.String("name", query.Name),
 			log.String("dblist", fmt.Sprintf("%+v", DBList)))
+
+		if query.QueryAllDB && dbName == "polardb_admin" {
+			continue
+		}
+
 		singleMsgContext, err := c.collectSingleSQL(query, dbName)
 		if err != nil {
 			c.logger.Warn("collect single SQL error", err,
@@ -688,6 +727,7 @@ func (c *PolarDBPgMultidimensionCollector) getConnection(dbName string) (*sql.DB
 		c.dbInfo.connections[dbName] = conn
 
 		conn.Exec("SET log_min_messages=FATAL")
+		conn.SetMaxIdleConns(0)
 	}
 
 	return conn, nil
@@ -701,6 +741,8 @@ func (c *PolarDBPgMultidimensionCollector) execQuerySQL(query string, dbName str
 		c.logger.Error("get db connection failed", err)
 		return nil, nil, err
 	}
+
+	defer c.timeTrack(dbName+": "+query, time.Now())
 
 	ctx, cancel := context.WithTimeout(context.Background(), DBQueryTimeout*time.Second)
 
@@ -728,8 +770,12 @@ func (c *PolarDBPgMultidimensionCollector) collectSingleSQL(qctx db_config.Query
 			defer cancel()
 		}
 		if err != nil {
-			c.logger.Warn("exec queryDB failed", err, log.String("query", qctx.Query))
-			return msgContext, err
+			if strings.Contains(err.Error(), "pq: target backend may not exists") {
+				return msgContext, nil
+			} else {
+				c.logger.Warn("exec queryDB failed", err, log.String("query", qctx.Query))
+				return msgContext, err
+			}
 		}
 		defer valRows.Close()
 	} else {
@@ -809,14 +855,16 @@ func (c *PolarDBPgMultidimensionCollector) collectSingleSQL(qctx db_config.Query
 			// 增量数据
 			if strings.HasPrefix(col.Name(), "delta_") {
 				k := dimensionKey + col.Name()
-				c.CalDeltaData(ns, k, kv, NormalizeColumn(col.Name()), 0, ptrInt.Float64)
+				c.CalDeltaData(ns, k, kv, NormalizeColumn(col.Name()), time.Now().Unix(),
+					ptrInt.Float64, false, qctx.Cycle >= int64(c.cInfo.longCollectIntervalThreshold))
 				continue
 			}
 
 			if strings.HasPrefix(col.Name(), "rate_") {
 				k := dimensionKey + col.Name()
 				c.CalDeltaData(ns, k, kv,
-					NormalizeColumn(col.Name()), time.Now().Unix(), ptrInt.Float64)
+					NormalizeColumn(col.Name()), time.Now().Unix(),
+					ptrInt.Float64, true, qctx.Cycle >= int64(c.cInfo.longCollectIntervalThreshold))
 				continue
 			}
 
@@ -869,16 +917,19 @@ func (c *PolarDBPgMultidimensionCollector) getDataDir(basepath string, env map[s
 
 func (p *PolarDBPgMultidimensionCollector) CalDeltaData(ns string,
 	deltaName string, kv map[string]interface{},
-	key string, timestamp int64, value float64) float64 {
+	key string, timestamp int64, value float64, do_rate, do_record_start bool) float64 {
 
 	var result float64
 
 	if nsmap, ok := p.preValueMap[ns]; ok {
 		if oldValue, ok := nsmap[deltaName]; ok {
-			if timestamp != 0 {
+			if do_rate {
 				if value >= oldValue.Value && timestamp-oldValue.LastTimestamp > 0 {
 					result = (value - oldValue.Value) / float64(timestamp-oldValue.LastTimestamp)
 					kv[key] = result
+					if do_record_start {
+						kv["begin_snapshot_time"] = strconv.FormatInt(oldValue.LastTimestamp, 10)
+					}
 				} else {
 					result = float64(0)
 				}
@@ -886,6 +937,9 @@ func (p *PolarDBPgMultidimensionCollector) CalDeltaData(ns string,
 				if value >= oldValue.Value {
 					result = (value - oldValue.Value)
 					kv[key] = result
+					if do_record_start {
+						kv["begin_snapshot_time"] = strconv.FormatInt(oldValue.LastTimestamp, 10)
+					}
 				} else {
 					result = float64(0)
 				}
@@ -941,8 +995,10 @@ func (c *PolarDBPgMultidimensionCollector) CollectSysInfo(out map[string]interfa
 
 func (c *PolarDBPgMultidimensionCollector) Collect(out map[string]interface{}) error {
 
-	if c.cInfo.count == 5 {
-		if err := c.CollectSysInfo(out); err != nil {
+	sendToMultiBackendMap := make(map[string]interface{})
+
+	if c.cInfo.count == 5 || c.cInfo.count%3600 == 5 {
+		if err := c.CollectSysInfo(sendToMultiBackendMap); err != nil {
 			c.logger.Warn("collect sys info failed", err)
 		}
 	}
@@ -965,9 +1021,7 @@ func (c *PolarDBPgMultidimensionCollector) Collect(out map[string]interface{}) e
 		c.logger.Debug("enable_ro_multidimension_collect is off")
 	}
 
-	sendToMultiBackendMap := make(map[string]interface{})
-
-	for _, query := range c.cInfo.querymap {
+	for name, query := range c.cInfo.querymap {
 		c.logger.Debug("query snapshot",
 			log.String("query", query.Query), log.Int("use snapshot", query.UseSnapshot),
 			log.Bool("need snapshot", c.cInfo.dbNeedSnapshot))
@@ -986,15 +1040,28 @@ func (c *PolarDBPgMultidimensionCollector) Collect(out map[string]interface{}) e
 			}
 		}
 
-		if query.Cycle >= 600 {
+		if int(query.Cycle) >= c.cInfo.longCollectIntervalThreshold {
 			c.logger.Info("collect long interval metrics",
 				log.String("name", query.Name),
 				log.Int64("cycle", query.Cycle))
 		}
 
+		collectTime := time.Now().UnixNano() / 1e6
+
 		msgContext, err := c.collectSQL(query)
 		if err != nil {
 			c.logger.Warn("collect failed", err, log.String("sql", query.Query))
+			continue
+		}
+
+		duration := time.Now().UnixNano()/1e6 - collectTime
+		if duration >= 1500 {
+			c.logger.Info("slow collection query",
+				log.String("name", name),
+				log.Int64("duration", duration))
+		}
+
+		if len(*msgContext) == 0 {
 			continue
 		}
 
@@ -1200,17 +1267,12 @@ func (c *PolarDBPgMultidimensionCollector) execDB(sql string) error {
 }
 
 func (c *PolarDBPgMultidimensionCollector) queryDB(sql string) (*sql.Rows, context.CancelFunc, error) {
-	collectTime := time.Now().UnixNano() / 1e6
+	defer c.timeTrack(sql, time.Now())
 	ctx, cancel := context.WithTimeout(context.Background(), DBQueryTimeout*time.Second)
 
 	rows, err := c.dbInfo.db.QueryContext(ctx, "/* rds internal mark */ "+sql)
-	log.Debug("collect ins done.",
-		log.Int("port", c.Port),
-		log.String("sql", sql),
-		log.Int64("duration", time.Now().UnixNano()/1e6-collectTime))
-
 	if err != nil {
-		c.logger.Error("query db failed", err)
+		// c.logger.Error("query db failed", err)
 		return nil, cancel, err
 	}
 	return rows, cancel, nil
@@ -1423,19 +1485,34 @@ func (c *PolarDBPgMultidimensionCollector) getDBRole() (int, error) {
 	var inRecoveryMode bool
 	var err error
 
-	if nodetype, err := c.getNodeType(); err != nil {
-		c.logger.Warn("get node type failed", err)
-	} else {
-		if nodetype == "standalone_datamax" {
-			c.Role = "Logger"
-			return DataMax, nil
-		}
-	}
-
 	if inRecoveryMode, err = c.isInRecoveryMode(); err != nil {
 		c.logger.Error("check with recovery mode failed.", err)
 		c.Role = "Standby"
 		return StandBy, err
+	}
+
+	if nodetype, err := c.getNodeType(); err != nil {
+		c.logger.Warn("get node type failed", err)
+	} else {
+		switch nodetype {
+		case "master":
+			if inRecoveryMode {
+				c.Role = "RO"
+				return RO, nil
+			} else {
+				c.Role = "RW"
+				return RW, nil
+			}
+		case "replica":
+			c.Role = "RO"
+			return RO, nil
+		case "standby":
+			c.Role = "Standby"
+			return StandBy, nil
+		case "standalone_datamax":
+			c.Role = "Logger"
+			return DataMax, nil
+		}
 	}
 
 	if inRecoveryMode {
@@ -1542,6 +1619,10 @@ func (c *PolarDBPgMultidimensionCollector) checkIfNeedRestart() error {
 							log.Int64("new version", version))
 						return err
 					}
+					if err = c.initMetaService(); err != nil {
+						c.logger.Warn("reinit meta service failed", err)
+						return err
+					}
 					c.cInfo.dbConfigNeedUpdate = false
 					c.logger.Info("db config version update",
 						log.Int64("old version", c.cInfo.dbConfigVersion),
@@ -1562,6 +1643,10 @@ func (c *PolarDBPgMultidimensionCollector) checkIfNeedRestart() error {
 							c.logger.Warn("reinit queries failed", err,
 								log.Int64("old version", c.cInfo.dbConfigVersion),
 								log.Int64("new version", version))
+							return err
+						}
+						if err = c.initMetaService(); err != nil {
+							c.logger.Warn("reinit meta service failed", err)
 							return err
 						}
 						c.cInfo.dbConfigNeedUpdate = false
@@ -1591,7 +1676,7 @@ func (c *PolarDBPgMultidimensionCollector) checkIfNeedRestart() error {
 	return nil
 }
 
-// TODO(wormhole.gl): these two functions
+// TODO(wormhole.gl): merge these two functions
 func (c *PolarDBPgMultidimensionCollector) GetMapValue(m map[string]interface{},
 	key string, defValue interface{}) interface{} {
 	if v, ok := m[key]; ok {
@@ -1670,4 +1755,14 @@ func (c *PolarDBPgMultidimensionCollector) getValueFromDB(query string) (string,
 	}
 
 	return "", errors.New("cannot get anything from db")
+}
+
+func (c *PolarDBPgMultidimensionCollector) timeTrack(key string, start time.Time) {
+	elapsed := time.Since(start)
+	if elapsed.Milliseconds() >= c.cInfo.slowCollectionLogThreshold {
+		c.logger.Info("slow collection",
+			log.String("function", key),
+			log.Int64("thres", c.cInfo.slowCollectionLogThreshold),
+			log.Int64("elapsed", elapsed.Milliseconds()))
+	}
 }

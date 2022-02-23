@@ -24,9 +24,12 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"time"
 
 	"sort"
 	"strconv"
@@ -74,8 +77,11 @@ type BackendsConf struct {
 
 type DBBackendConf struct {
 	DbBackends struct {
-		BackendsConf    []BackendsConf    `json:"backends_conf"`
-		DatatypeBackend []DatatypeBackend `json:"datatype_backend"`
+		BackendsConf               []BackendsConf    `json:"backends_conf"`
+		DatatypeBackend            []DatatypeBackend `json:"datatype_backend"`
+		EnableRemoteDBBackend      bool              `json:"enable_remote_db_backend"`
+		EnableMaxscaleWriteLocal   bool              `json:"enable_maxscale_write_local_db_backend"`
+		HideHostIPInLocalDBBackend bool              `json:"hide_hostip_in_local_db_backend"`
 	} `json:"db_backends"`
 	DefaultRetentionTime     int                  `json:"default_retention_time"`
 	DefaultRetentionInterval int                  `json:"default_retention_interval"`
@@ -186,6 +192,12 @@ func PluginRun(ctx interface{}, param interface{}) error {
 		}
 	} else if data_type == "host" {
 		role = "Host"
+	} else if data_type == "maxscale" {
+		role = "Maxscale"
+	} else if data_type == "cluster_manager" {
+		role = "ClusterManager"
+	} else {
+		log.Warn("[db_backend] we do not recognize this data type", log.String("role", data_type))
 	}
 
 	// get logical ins name for non polardb o
@@ -197,11 +209,20 @@ func PluginRun(ctx interface{}, param interface{}) error {
 					log.Debug("[db_backend] use meta dbinfo",
 						log.String("ins", dbinfo.InsName))
 					logical_ins_name = dbinfo.InsName
+				} else {
+					insname, err := GetInsNameFromDBInfo(dbinfo)
+					if err != nil {
+						log.Warn("[db_backend] get logical ins name failed",
+							log.String("err", err.Error()))
+					} else {
+						log.Debug("[db_backend] get logical ins name",
+							log.String("ins", insname))
+						dbinfo.InsName = insname
+						logical_ins_name = insname
+					}
 				}
-
-				// TODO(wormhole.gl): get ins name from db
 			} else {
-				log.Warn("[sqlite_backend] get topology failed",
+				log.Warn("[db_backend] get topology failed",
 					log.String("data type", data_type), log.String("port", port))
 				return nil
 			}
@@ -274,7 +295,7 @@ func PluginRun(ctx interface{}, param interface{}) error {
 			"enable_write_localdb_backend",
 			"integer", 1).(int)
 		if enable_localdb_backend == 0 {
-			log.Debug("[db_backend] local db backend is disabled")
+			log.Debug("[db_backend] local db backend is disabled", log.String("insname", insname))
 			return nil
 		}
 
@@ -282,7 +303,20 @@ func PluginRun(ctx interface{}, param interface{}) error {
 			"enable_ro_write_localdb_backend",
 			"integer", 0).(int)
 		if role == "RO" && enable_ro_write_localdb_backend == 0 {
-			log.Debug("[db_backend] ro write local db backend is disabled")
+			log.Debug("[db_backend] ro write local db backend is disabled",
+				log.String("insname", insname))
+			return nil
+		}
+
+		hide_hostip_in_local_db_backend := backendCtx["hide_hostip_in_local_db_backend"].(bool)
+		if hide_hostip_in_local_db_backend {
+			host = "**.**.***.***"
+			port = "*****"
+		}
+
+		if role != "RW" && role != "RO" && role != "Maxscale" && role != "ClusterManager" {
+			log.Debug("[db_backend] ignore role for local backend",
+				log.String("insname", insname), log.String("role", role))
 			return nil
 		}
 
@@ -320,6 +354,20 @@ func PluginRun(ctx interface{}, param interface{}) error {
 			dbinfo.Password = tmpdbinfo.Password
 			dbinfo.Schema = tmpdbinfo.Schema
 			dbinfo.DBName = localdb_backend_dbname
+
+			if role == "Maxscale" &&
+				GetConfigFromDBInfo(dbinfo, "enable_maxscale_write_local_db_backend",
+					port, "integer", 0).(int) == 0 {
+				log.Debug("[db_backend] maxscale write local db backend is disabled",
+					log.String("insname", insname))
+				return nil
+			}
+
+			if role == "ClusterManager" {
+				log.Info("[db_backend] cluster manager insert",
+					log.String("local ins port", port))
+			}
+
 			log.Debug("[db_backend] get rw by ins port",
 				log.String("local ins port", port),
 				log.String("rw", fmt.Sprintf("%s:%d", dbinfo.Host, dbinfo.Port)),
@@ -336,16 +384,23 @@ func PluginRun(ctx interface{}, param interface{}) error {
 				return nil
 			} else {
 				if role != "RW" {
-					log.Info("[db_backend] we are not RW and we don't get RW's topology, do nothing")
+					log.Debug("[db_backend] we are not RW and we don't get RW's topology, do nothing",
+						log.String("ins name", insname))
 					return nil
 				}
 			}
 		}
 	} else if backendLocation == "remote" {
+		enable_remotedb_backend_localconf := backendCtx["enable_remote_db_backend"].(bool)
+		if !enable_remotedb_backend_localconf {
+			log.Debug("[db_backend] remote db backend is disabled in db_backend conf")
+			return nil
+		}
+
 		enable_remotedb_backend := GetConfigMapValue(configmap,
 			"enable_write_remotedb_backend", "integer", 1).(int)
 		if enable_remotedb_backend == 0 {
-			log.Warn("[sqlite_backend] remote db backend is disabled")
+			log.Debug("[db_backend] remote db backend is disabled in param")
 			return nil
 		}
 
@@ -462,6 +517,7 @@ func PluginRun(ctx interface{}, param interface{}) error {
 				log.String("datamodel", k),
 				log.String("error", err.Error()))
 		}
+
 	}
 
 	return nil
@@ -526,6 +582,9 @@ func initContext(content []byte, m map[string]interface{}) error {
 		datatypes[v.Name] = v
 	}
 	m["datatype_conf"] = datatypes
+	m["enable_remote_db_backend"] = backendConf.DbBackends.EnableRemoteDBBackend
+	m["enable_maxscale_write_local_db_backend"] = backendConf.DbBackends.EnableMaxscaleWriteLocal
+	m["hide_hostip_in_local_db_backend"] = backendConf.DbBackends.HideHostIPInLocalDBBackend
 
 	m["init_sqls"] = backendConf.InitSQLs
 
@@ -648,6 +707,122 @@ func GetConfigMapValue(m map[string]interface{}, key string,
 	return defValue
 }
 
+func GetConfigFromDBInfo(dbinfo *dao.DBInfo, ns, key string,
+	valueType string, defValue interface{}) interface{} {
+
+	v, ok := meta.GetMetaService().GetInterface(ns, key)
+	if ok {
+		log.Debug("[db_backend] maxscale use map value", log.String("ns", ns), log.String("key", key))
+		return v
+	} else {
+		dbUrl := fmt.Sprintf("host=%s user=%s dbname=%s port=%d password=%s "+
+			"fallback_application_name=%s sslmode=disable connect_timeout=%d",
+			dbinfo.Host, dbinfo.UserName, dbinfo.DBName, dbinfo.Port, dbinfo.Password,
+			"ue_backend_get_insname", DBConnTimeout)
+		db, err := sql.Open("postgres", dbUrl)
+		if err != nil {
+			log.Error("[db_backend] connect err", log.String("dbUrl", dbUrl))
+			return defValue
+		}
+		defer db.Close()
+
+		query := fmt.Sprintf("SELECT value FROM %s.%s WHERE name='%s'",
+			"polar_gawr_collection", "meta_base_config", ns)
+		ctx, _ := context.WithTimeout(context.Background(), DBQueryTimeout*time.Second)
+		rows, err := db.QueryContext(ctx, query)
+		if err != nil {
+			meta.GetMetaService().SetInterfaceTTL(ns, key, defValue, 10)
+			log.Debug("[db_backend] get config from db fail",
+				log.String("query", query),
+				log.String("dbUrl", dbUrl),
+				log.String("err", err.Error()))
+			return defValue
+		}
+		defer rows.Close()
+
+		if rows.Next() {
+			var retValue string
+			if err := rows.Scan(&retValue); err != nil {
+				log.Debug("[db_backend] row scan failed for system identifier",
+					log.String("query", query),
+					log.String("err", err.Error()))
+				return defValue
+			}
+
+			switch valueType {
+			case "string":
+				meta.GetMetaService().SetInterfaceTTL(ns, key, retValue, 10)
+				return retValue
+			case "integer":
+				if intv, err := strconv.Atoi(retValue); err == nil {
+					meta.GetMetaService().SetInterfaceTTL(ns, key, intv, 10)
+					log.Debug("[db_backend] maxscale set config name", log.String("ns", ns), log.String("key", key))
+					return intv
+				} else {
+					log.Warn("[db_backend] config value type is not integer",
+						log.String("key", key),
+						log.String("error", err.Error()),
+						log.String("value", fmt.Sprintf("%+v", intv)))
+					return defValue
+				}
+			default:
+				log.Debug("[db_backend] cannot recognize this value type",
+					log.String("type", valueType))
+				return defValue
+			}
+		} else {
+			log.Debug("[db_backend] maxscale cannot get config name", log.String("ns", ns), log.String("key", key))
+			meta.GetMetaService().SetInterfaceTTL(ns, key, defValue, 10)
+			return defValue
+		}
+	}
+}
+
+func GetInsNameFromDBInfo(dbinfo *dao.DBInfo) (string, error) {
+	dbUrl := fmt.Sprintf("host=%s user=%s dbname=%s port=%d password=%s "+
+		"fallback_application_name=%s sslmode=disable connect_timeout=%d",
+		dbinfo.Host, dbinfo.UserName, dbinfo.DBName, dbinfo.Port, dbinfo.Password,
+		"ue_backend_get_insname", DBConnTimeout)
+	db, err := sql.Open("postgres", dbUrl)
+	if err != nil {
+		log.Error("[db_backend] connect err", log.String("dbUrl", dbUrl))
+		return "", err
+	}
+	defer db.Close()
+
+	// better to SELECT ins name FROM polar_gawr_collection.dim_ins_info
+	query := "SELECT system_identifier FROM pg_control_system()"
+	ctx, _ := context.WithTimeout(context.Background(), DBQueryTimeout*time.Second)
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		log.Error("[db_backend] get meta data store config fail",
+			log.String("query", query),
+			log.String("dbUrl", dbUrl),
+			log.String("err", err.Error()))
+		return "", err
+	}
+	defer rows.Close()
+
+	var system_identifier string
+
+	if rows.Next() {
+		if err := rows.Scan(&system_identifier); err != nil {
+			log.Error("[db_backend] row scan failed for system identifier",
+				log.String("query", query),
+				log.String("err", err.Error()))
+			return "", err
+		}
+	} else {
+		log.Warn("[db_backend] cannot get system identifier")
+		return "", errors.New("cannot get system identifier")
+	}
+
+	log.Info("[db_backend] get system identifier",
+		log.String("system identifier", system_identifier))
+
+	return system_identifier, nil
+}
+
 func init() {
-	sqlite_dir = utils.GetBasePath()
+	sqlite_dir = utils.GetBasePath() + "/data/sqlite"
 }

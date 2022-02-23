@@ -25,18 +25,25 @@ package meta
 
 import (
 	"sync"
+	"time"
 )
 
 var meta *MetaService
 var once sync.Once
 
+type TTL struct {
+	modify int64
+	ttl    int64
+}
+
 type MetaService struct {
 	MetaMap *sync.Map
+	TTLMap  *sync.Map
 }
 
 func GetMetaService() *MetaService {
 	once.Do(func() {
-		meta = &MetaService{MetaMap: &sync.Map{}}
+		meta = &MetaService{MetaMap: &sync.Map{}, TTLMap: &sync.Map{}}
 	})
 
 	return meta
@@ -46,13 +53,28 @@ func genkey(namespace string, name string) string {
 	return namespace + "_" + name
 }
 
+func (m *MetaService) SetInterfaceTTL(namespace string, name string, value interface{}, ttl int64) {
+	m.MetaMap.Store(genkey(namespace, name), value)
+	m.TTLMap.Store(genkey(namespace, name), TTL{modify: time.Now().Unix(), ttl: ttl})
+}
+
 func (m *MetaService) SetInterface(namespace string, name string, value interface{}) {
 	m.MetaMap.Store(genkey(namespace, name), value)
 }
 
 func (m *MetaService) GetInterface(namespace string, name string) (interface{}, bool) {
-	v, ok := m.MetaMap.Load(genkey(namespace, name))
+	key := genkey(namespace, name)
+	v, ok := m.MetaMap.Load(key)
 	if ok {
+		ttl, tok := m.TTLMap.Load(key)
+		if tok {
+			if time.Now().Unix()-ttl.(TTL).modify > ttl.(TTL).ttl {
+				m.MetaMap.Delete(key)
+				m.TTLMap.Delete(key)
+				return nil, false
+			}
+		}
+
 		return v, ok
 	}
 
@@ -105,6 +127,32 @@ func (m *MetaService) GetString(namespace string, name string) (string, bool) {
 	}
 
 	return "", ok
+}
+
+func (m *MetaService) SetInteger(namespace string, name string, value int64) {
+	m.MetaMap.Store(genkey(namespace, name), value)
+}
+
+func (m *MetaService) GetInteger(namespace string, name string) (int64, bool) {
+	v, ok := m.MetaMap.Load(genkey(namespace, name))
+	if ok {
+		return v.(int64), ok
+	}
+
+	return int64(0), ok
+}
+
+func (m *MetaService) SetFloat(namespace string, name string, value float64) {
+	m.MetaMap.Store(genkey(namespace, name), value)
+}
+
+func (m *MetaService) GetFloat(namespace string, name string) (float64, bool) {
+	v, ok := m.MetaMap.Load(genkey(namespace, name))
+	if ok {
+		return v.(float64), ok
+	}
+
+	return float64(0), ok
 }
 
 func (m *MetaService) GetSingleString(namespace string, name string) string {

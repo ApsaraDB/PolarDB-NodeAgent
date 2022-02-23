@@ -1,0 +1,61 @@
+{
+  "headers": [
+    {
+      "index": 0,
+      "name": "version",
+      "type": "string"
+    },
+    {
+      "index": 1,
+      "name": "log_type",
+      "type": "string"
+    },
+    {
+      "index": 2,
+      "name": "hostname",
+      "type": "string"
+    },
+    {
+      "index": 3,
+      "name": "ip",
+      "type": "string"
+    },
+    {
+      "index": 4,
+      "name": "port",
+      "type": "int"
+    },
+    {
+      "index": 5,
+      "name": "collect_time",
+      "type": "int"
+    },
+    {
+      "index": 6,
+      "type": "string",
+      "name": "ins_name"
+    },
+    {
+      "index": 7,
+      "name": "product_code",
+      "type": "string"
+    }
+  ],
+  "metrics": [
+    {
+      "index": 0,
+      "type": "string",
+      "name": "id"
+    },
+    {
+      "index": 1,
+      "type": "string",
+      "name": "count"
+    },
+    {
+      "index": 2,
+      "type": "string",
+      "name": "msg"
+    }
+  ]
+}

@@ -313,9 +313,9 @@ func main() {
 	if printversion {
 		fmt.Printf("go version: %s\ncompiler: %s\nbuildtime: %s\nplarform: %s\n"+
 			"git branch: %s\ncommit id: %s\n",
-			runtime.Version(), runtime.Compiler,
-			Buildtime, fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
-			GitBranch, GitCommitID,
+			utils.RpmName, utils.RpmRelease, utils.RpmVersion, runtime.Version(), runtime.Compiler,
+			utils.Buildtime, fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+			utils.GitBranch, utils.GitCommitID,
 		)
 		return
 	}
