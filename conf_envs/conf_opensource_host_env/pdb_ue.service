@@ -5,9 +5,9 @@ After=network.target
 [Service]
 Type=forking
 PIDFile=/run/pdb_ue.pid
-ExecStart=/opt/pdb_ue/bin/service_systemd.sh start
-ExecReload=/opt/pdb_ue/bin/service_systemd.sh restart
-ExecStop=/opt/pdb_ue/bin/service_systemd.sh stop
+ExecStart=/opt/pdb_ue/bin/service.sh start
+ExecReload=/opt/pdb_ue/bin/service.sh restart
+ExecStop=/opt/pdb_ue/bin/service.sh stop
 Restart=always
 LimitNOFILE=65536
 
