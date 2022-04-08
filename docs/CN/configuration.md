@@ -215,7 +215,7 @@ polar_gawr_collection.rollback_collection_to_default(
 ```
 
 ### PolarDB-NodeAgent backend配置
-目前支持以下两种backend, backend目前配置较为繁琐, 后续会做简化:
+目前支持以下三种backend, backend目前配置较为繁琐, 后续会做简化:
 |backend|    说明    |详细配置|
 |  ----  | ----  | ---- |
 |golang-backend-db    |写入polardb|    plugin/db_backend/db_backend.conf|
