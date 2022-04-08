@@ -163,6 +163,11 @@ func (dr *DockerRunner) handleDiscover(wg *sync.WaitGroup) {
 					continue
 				}
 			}
+		} else {
+			if dr.pInfo.Target != "*" {
+				log.Info("[docker_runner] db type not found", log.String("container", container.ContainerID), log.String("target", dr.pInfo.Target))
+				continue
+			}
 		}
 
 		sPort, ok := container.Labels[consts.ApsaraInsPort]
