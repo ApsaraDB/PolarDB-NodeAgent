@@ -260,34 +260,29 @@ polar_gawr_collection.rollback_collection_to_default(
 ```
 
 #### prometheus backend
-prometheus目前仅支持推送pushgateway, 在UE配置中可以指定pushgateway的endpoint
+目前支持作为prometheus的exporter, 在配置中可以指定端口
 ```
 # conf/plugin/prometheus_backend/prometheus_backend.conf
 
 {
-    "endpoint": "10.252.205.20:9091"
+    "exporter_port": 9974
 }
 ```
-* endpoint: pushgateway的endpoint;
-* metric_prefix: 如果对metric存在命名规范, 比如统一前缀标识, 可以通过此字段补充;
-* interval: 推送间隔, 如果pushgateway存在性能瓶颈, 可以通过调整interval降采样;
+* exporter_port: exporter监听端口
 
 
 对应prometheus 的推荐 scrape_config:
 ```
 scrape_configs:
-  # job_name设置采集的label
   - job_name: 'polardb_o'
 
     static_configs:
-    # 指定pushgateway的地址
-    - targets: ['localhost:9091']
+    - targets: ['0.0.0.0:9974']
 
     honor_labels: true
 
-        # 拉取周期及超时时间, 由于polardb_o的监控数据为每秒推送且量较大, 频繁拉取容易超时, 建议均设置在60s
-    scrape_interval: 60s
-    scrape_timeout: 60s
+    scrape_interval: 20s
+    scrape_timeout: 20s
 ```
 
 需要重启PolarDB-NodeAgent

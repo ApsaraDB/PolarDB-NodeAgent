@@ -2,11 +2,8 @@
 
 本文档介绍了如何安装和运行PolarDB-NodeAgent，并查看采集到的监控数据。
 
-对于PolarDB-for-PostgreSQL, PolarDB-NodeAgent默认把将监控数据写回数据库, 并在数据库内提供视图以供查询, 也可通过配置将监控数据推送给prometheus pushgateway, 具体配置可见[配置文档](configuration.md).
-此外, 对于监控数据存入数据库的场景, 还配有grafana dashboard方便展示.
-
-对于PolarDB-for-PostgreSQL, db-monitor默认把将监控数据写回数据库, 并在数据库内提供视图以供查询, 也可通过配置将监控数据推送给prometheus pushgateway, 具体配置可见[配置文档](configuration.md).
-此外, 对于监控数据存入数据库的场景, 还配有grafana dashboard方便展示.
+对于PolarDB-for-PostgreSQL, PolarDB-NodeAgent默认在9974端口提供exporter服务, 供Prometheus收集数据, 具体配置可见[配置文档](configuration.md).
+此外, 还提供grafana dashboard配置方便展示.
 
 对于PolarDB-for-PostgreSQL, db-monitor默认把将监控数据写回数据库, 并在数据库内提供视图以供查询, 也可通过配置将监控数据推送给prometheus pushgateway, 具体配置可见[配置文档](configuration.md).
 此外, 对于监控数据存入数据库的场景, 还配有grafana dashboard方便展示.
@@ -77,38 +74,41 @@ sh bin/service.sh stop
 sh bin/service.sh restart
 ```
 
-
-
 ## 查看监控数据
 
-### 数据库
+### Prometheus配置
 
-所有采集到的监控数据，默认均存放于数据库实例的`polar_gawr_collection` schema下，可以通过视图进行查看。
+在prometheus配置文件的`scrape_conigs`中, 添加以下配置:
+```
+  - job_name: 'polardb_o'
 
-例如：`view_fact_dbmetrics`保存数据库资源消耗情况及基础监控指标。
-所有监控指标可见[metrics说明](metrics.md)文档，采集及指标保留配置情况可见[配置说明](configuration.md)文档。
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+
+    static_configs:
+    - targets: ['0.0.0.0:9974']
+
+    honor_labels: true
+
+    scrape_interval: 20s
+    scrape_timeout: 20s
+```
+
+具体监控指标可见[metrics说明](metrics.md)文档, 需要注意的是导入到prometheus中的指标全部添加了`polar_`前缀.
 
 ### Grafana
 
 除数据库视图之外，目前还提供更直观的grafana展示，可以通过导入grafana dashboard配置的形式进行查看。
 推荐使用最新版本的grafana 8.2.1，安装部署可见官方文档。
 
-#### 前置条件
-
-* 认证: 需要合理设置数据库的访问配置, 即`pg_hba.conf`, 以便外部访问
-* 鉴权: 对于非超级用户, 需要赋予 `polar_gawr_user` 权限:
-```
-GRANT polar_gawr_user TO [用户名]
-```
-
 #### 添加数据源
 
-PolarDB使用`PostgreSQL`数据源，数据源配置请根据实际情况填写。
+Prometheus数据源配置请根据实际情况填写。
 
 ![添加数据源](grafana_add_datasource.png)
 
 #### 导入Dashboard
 
-PolarDB提供配置好的报表样例，在`grafana`目录下。
+PolarDB提供配置好的报表样例，在代码库`grafana`目录下。
 
 ![导入Dashboard](grafana_import_dashboard.png)
