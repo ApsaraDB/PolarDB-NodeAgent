@@ -220,6 +220,7 @@ polar_gawr_collection.rollback_collection_to_default(
 |  ----  | ----  | ---- |
 |golang-backend-db    |写入polardb|    plugin/db_backend/db_backend.conf|
 |golang-backend-prometheus    |写入prometheus    |plugin/prometheus_backend/prometheus_backend.conf|
+|golang-backend-influxdb    |写入influxdb    |plugin/influxdb_backend/influxdb_backend.conf|
 每一种backend都可进行详细配置, 具体如下
 
 #### db backend
@@ -283,6 +284,23 @@ scrape_configs:
 
     scrape_interval: 20s
     scrape_timeout: 20s
+```
+
+需要重启PolarDB-NodeAgent
+生效, 重启方式见前文.
+
+#### influxdb backend
+支持直接写入influxdb, endpoint可在配置中指定
+```
+# conf/plugin/influxdb_backend/influxdb_backend.conf
+{
+    "endpoint": "localhost:8086",
+    "database": "polardb_o",
+    "username": "",
+    "password": "",
+    "log_outdict": false,
+    "timeout_ms": 5000
+}
 ```
 
 需要重启PolarDB-NodeAgent
