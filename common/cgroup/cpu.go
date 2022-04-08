@@ -63,10 +63,10 @@ const (
 	cpuCfsPeriodUs = "cpu.cfs_period_us"
 	cpuSetCpus     = "cpuset.cpus"
 
-	memoryUsageInBytes = "memory.usage_in_bytes"
-	memoryStat         = "memory.stat"
-	memoryLimitInBytes = "memory.limit_in_bytes"
-
+	memoryUsageInBytes    = "memory.usage_in_bytes"
+	memoryStat            = "memory.stat"
+	memoryLimitInBytes    = "memory.limit_in_bytes"
+	memoryMaxUsageInBytes = "memory.max_usage_in_bytes"
     kmemoryUsageInBytes = "memory.kmem.usage_in_bytes"
 
 	hugeTlb2MUsageInBytes = "hugetlb.2MB.usage_in_bytes"
@@ -130,6 +130,7 @@ type CPUMem struct {
 	memoryUsageInBytesPath  string
 	memoryStatPath          string
 	memoryLimitInBytesPath  string
+    memoryMaxUsageInBytesPath string
     kmemoryUsageInBytesPath string
 	hugeTlbUsageInBytesPath string
 	tick                    uint64
@@ -156,6 +157,7 @@ func (cm *CPUMem) InitMemory(path string) error {
 	cm.memoryUsageInBytesPath = filepath.Join(path, memoryUsageInBytes)
 	cm.memoryStatPath = filepath.Join(path, memoryStat)
 	cm.memoryLimitInBytesPath = filepath.Join(path, memoryLimitInBytes)
+	cm.memoryMaxUsageInBytesPath = filepath.Join(path, memoryMaxUsageInBytes)
     cm.kmemoryUsageInBytesPath = filepath.Join(path, kmemoryUsageInBytes)
 	return nil
 }
@@ -244,6 +246,11 @@ func (cm *CPUMem) GetMemoryUsage() (uint64, error) {
 func (cm *CPUMem) GetMemoryLimit() (uint64, error) {
 	limit, err := cm.getSingleValue(cm.memoryLimitInBytesPath)
 	return uint64(limit), err
+}
+
+func (cm *CPUMem) GetMaxUsageInBytes() (uint64, error) {
+	max, err := cm.getSingleValue(cm.memoryMaxUsageInBytesPath)
+	return uint64(max), err
 }
 
 func (cm *CPUMem) GetKernalMemoryUsage() (uint64, error) {

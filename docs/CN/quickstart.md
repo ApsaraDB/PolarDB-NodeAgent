@@ -8,6 +8,9 @@
 对于PolarDB-for-PostgreSQL, db-monitor默认把将监控数据写回数据库, 并在数据库内提供视图以供查询, 也可通过配置将监控数据推送给prometheus pushgateway, 具体配置可见[配置文档](configuration.md).
 此外, 对于监控数据存入数据库的场景, 还配有grafana dashboard方便展示.
 
+对于PolarDB-for-PostgreSQL, db-monitor默认把将监控数据写回数据库, 并在数据库内提供视图以供查询, 也可通过配置将监控数据推送给prometheus pushgateway, 具体配置可见[配置文档](configuration.md).
+此外, 对于监控数据存入数据库的场景, 还配有grafana dashboard方便展示.
+
 ## 安装
 
 目前提供两种安装部署的方式：源码编译安装及RPM包安装，两种方式均需安装相关依赖。

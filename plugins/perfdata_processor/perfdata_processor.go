@@ -120,7 +120,11 @@ func PluginRun(ctx interface{}, param interface{}) error {
 	} else {
 		log.Warn("[perfdata_processor] unrecognize this plugin name, use inmap as outmap directly",
 			log.String("plugin", plugin))
-		outmap = inmap
+		if len(m["schema"].(*gather.BusinessSchema).Metrics.SchemaItems) > 0 {
+			outmap = rebuildGeneralMapWithSchema(plugin, inmap, nil, m["schema"].(*gather.BusinessSchema), m)
+		} else {
+			outmap = inmap
+		}
 	}
 
 	parammap["out"] = outmap
@@ -131,6 +135,34 @@ func PluginRun(ctx interface{}, param interface{}) error {
 func PluginExit(ctx interface{}) error {
 	log.Info("[perfdata_processor] PluginExit")
 	return nil
+}
+
+func rebuildGeneralMapWithSchema(plugin string,
+	in map[string]interface{},
+	config interface{},
+	schema *gather.BusinessSchema,
+	m map[string]interface{}) map[string]interface{} {
+	var err error
+	outmap := make(map[string]interface{})
+	metricmap := make(map[string]interface{})
+	outmap[plugin] = make([]map[string]interface{}, 0)
+	outmap[plugin] = append(outmap[plugin].([]map[string]interface{}), metricmap)
+
+	for _, item := range schema.Metrics.SchemaItems {
+		if item.ValueType == gather.IntType {
+			if _, ok := in[item.Name]; !ok {
+				continue
+			}
+
+			metricmap[item.Name], err = strconv.ParseUint(in[item.Name].(string), 10, 64)
+			if err != nil {
+				log.Warn("[perfdata_processor] convert maxscale int type value failed",
+					log.String("value", in[item.Name].(string)))
+			}
+		}
+	}
+
+	return outmap
 }
 
 func rebuildPolarDBPG(in map[string]interface{},

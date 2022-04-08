@@ -10,6 +10,10 @@ For PolarDB for PostgreSQL, db-monitor writes the monitoring data back to the da
 
 In addition, for the scenario where the monitoring data is stored in the database, db-monitor also provides you a grafana dashboard for easy display.
 
+For PolarDB for PostgreSQL, db-monitor writes the monitoring data back to the database by default, and provides views in the database for query. You can also push the monitoring data to prometheus pushgateway after configuration. For details about configuration, refer to [Configuration Document](configuration.md).
+
+In addition, for the scenario where the monitoring data is stored in the database, db-monitor also provides you a grafana dashboard for easy display.
+
 ## Installation
 
 There are two ways to install PolarDB-NodeAgent: Installing by compiling source code and by by building RPM package.
