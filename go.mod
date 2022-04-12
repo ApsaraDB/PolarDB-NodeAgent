@@ -34,4 +34,5 @@ require (
 require (
 	github.com/aarzilli/golua v0.0.0-20210507130708-11106aa57765
 	github.com/influxdata/influxdb1-client v0.0.0-20220302092344-a9ab5670611c
+	golang.org/x/sys v0.0.0-20210616094352-59db8d763f22
 )
