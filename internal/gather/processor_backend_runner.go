@@ -286,19 +286,24 @@ func (runner *Runner) getHostIP() string {
 					g_HostIP = ipnet.IP.String()
 					return g_HostIP
 				} else {
-					g_HostIP = ipnet.IP.String()
-					return g_HostIP
+					log.Info("[runner] cidr does not contains IP",
+						log.String("cidr", cidr.String()),
+						log.String("ip", ipnet.IP.String()))
+					if ipnet.IP.To4() != nil {
+						g_HostIP = ipnet.IP.String()
+					}
 				}
 			}
 		}
 	}
 
-	if loopback != nil {
+	if g_HostIP == "" && loopback != nil {
 		g_HostIP = loopback.IP.String()
+		log.Info("[runner] init ip use loopback")
 		return g_HostIP
 	}
 
-	log.Info("[runner] init ip without matching cidr",
+	log.Info("[runner] init ip without matching cidr, we use the last ip",
 		log.String("ip", g_HostIP))
 	return g_HostIP
 }
@@ -313,17 +318,19 @@ func init() {
 		"golang-collector-polardb_pg_multidimension_k8s": "polardb_pg_multidimension_collector",
 		"golang-collector-polarbox-maxscale-perf":        "maxscale_perf",
 		"golang-collector-sar":                           "sar",
+		"golang-collector-perf":                          "perf",
 		"golang-collector-cluster-manager-eventlog":      "cluster_manager_eventlog",
 		"golang-collector-polardb_pg_errorlog":           "polardb_pg_errlog",
 		"golang-collector-polarbox_oracle_errorlog":      "polardb_pg_errlog",
 	}
 
 	DatatypeFormalizeMap = map[string]string{
-		"polardb_pg_collector":                            "polardb-o",
-		"polardb_pg_multidimension_collector":             "polardb-o",
-		"maxscale_perf":                                   "maxscale",
-		"sar":                                             "host",
-		"cluster_manager_eventlog":                        "cluster_manager",
-		"polardb_pg_errlog":                               "polardb-o",
+		"polardb_pg_collector":                "polardb-o",
+		"polardb_pg_multidimension_collector": "polardb-o",
+		"maxscale_perf":                       "maxscale",
+		"sar":                                 "host",
+		"perf":                                "host",
+		"cluster_manager_eventlog":            "cluster_manager",
+		"polardb_pg_errlog":                   "polardb-o",
 	}
 }

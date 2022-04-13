@@ -1230,7 +1230,7 @@ func (c *PolarDBPgMultidimensionCollector) prepareObjects() error {
 		if err := c.execDB(queryCtx.Query); err != nil {
 			c.logger.Warn("exec collect init sql failed", err, log.String("query", queryCtx.Query))
 		} else {
-			c.logger.Info("exec collect init sql succeed", log.String("query", queryCtx.Query))
+			c.logger.Debug("exec collect init sql succeed", log.String("query", queryCtx.Query))
 		}
 	}
 

@@ -297,3 +297,4 @@ func (c *PerfCollector) calDeltaData(out map[string]interface{}, ns, k string,
 
 	c.preValueMap[key] = PreValue{LastTimestamp: c.timestamp, Value: value}
 }
+

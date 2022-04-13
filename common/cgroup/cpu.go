@@ -84,33 +84,34 @@ type MemoryStat struct {
 }
 
 type CPUMem struct {
-	cpuCount                int64
-	port                    uint64
-	buf                     *bytes.Buffer
-	perCpu                  []uint64
-	detail                  CpuDetail
-	sys                     uint64
-	usr                     uint64
-	total                   uint64
-	nrPeriods               uint64
-	nrThrottled             uint64
-	throttledTime           uint64
-	memoryStat              MemoryStat
-	cpuAcctUsagePath        string
-	cpuAcctStatPath         string
-	cpuStatPath             string
-	cpuAcctUsagePerCpuPath  string
-	cpuAcctProcStatPath     string
-	cpuCfsQuotaUsPath       string
-	cpuCfsPeriodUsPath      string
-	cpuSetCpusPath          string
-	memoryUsageInBytesPath  string
-	memoryStatPath          string
-	memoryLimitInBytesPath  string
-    memoryMaxUsageInBytesPath string
+	cpuCount      int64
+	port          uint64
+	buf           *bytes.Buffer
+	perCpu        []uint64
+	detail        CpuDetail
+	sys           uint64
+	usr           uint64
+	total         uint64
+	nrPeriods     uint64
+	nrThrottled   uint64
+	throttledTime uint64
+
+	memoryStat                MemoryStat
+	cpuAcctUsagePath          string
+	cpuAcctStatPath           string
+	cpuStatPath               string
+	cpuAcctUsagePerCpuPath    string
+	cpuAcctProcStatPath       string
+	cpuCfsQuotaUsPath         string
+	cpuCfsPeriodUsPath        string
+	cpuSetCpusPath            string
+	memoryUsageInBytesPath    string
+	memoryStatPath            string
+	memoryLimitInBytesPath    string
+	memoryMaxUsageInBytesPath string
     kmemoryUsageInBytesPath string
-	hugeTlbUsageInBytesPath string
-	tick                    uint64
+	hugeTlbUsageInBytesPath   string
+	tick                      uint64
 }
 
 func New(buf *bytes.Buffer) *CPUMem {

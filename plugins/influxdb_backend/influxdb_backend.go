@@ -117,6 +117,7 @@ func PluginInit(ctx interface{}) (interface{}, error) {
 	m["influxdb_conn"] = con
 
 	m["push_channel"] = make(chan InfluxDBPushChannelData, influxdbCtx.PushChannelLength)
+    m["push_channel_length"] = influxdbCtx.PushChannelLength
 	m["stop_channel"] = make(chan int)
 
 	go runPushChannel(

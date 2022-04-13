@@ -266,7 +266,7 @@ func rebuildPolarDBPG(in map[string]interface{},
 	return out
 }
 
-func rebuildPolarDBPGMultidimension(in map[string]interface{},
+func rebuildGeneralMap(in map[string]interface{},
 	config interface{},
 	schema *gather.BusinessSchema,
 	m map[string]interface{}) map[string]interface{} {
@@ -662,8 +662,9 @@ func GetConfigMapValue(m map[string]interface{},
 func init() {
 	ETLHandlerMap = map[string]ETLHandler{
 		"polardb_pg_collector":                rebuildPolarDBPG,
-		"polardb_pg_multidimension_collector": rebuildPolarDBPGMultidimension,
+		"polardb_pg_multidimension_collector": rebuildGeneralMap,
 		"sar":                                 rebuildSarMap,
+		"perf":                                rebuildGeneralMap,
 		"maxscale_perf":                       rebuildMaxscale,
 	}
 }
