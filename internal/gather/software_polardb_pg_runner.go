@@ -31,12 +31,8 @@ import (
 
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/internal/discover"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/config"
-)
-
-const (
-	MonitorConfPath = "conf/monitor.yaml"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/internal/discover"
 )
 
 // SoftwarePolardbRunner struct
@@ -69,34 +65,49 @@ func (rr *SoftwarePolardbRunner) initAddr() error {
 			log.String("err", err.Error()))
 	}
 
+	rr.addr = nil
+
 	for _, address := range addrs {
 		// check the address type and if it is not a loopback the display it
 		if ipnet, ok := address.(*net.IPNet); ok {
+			if ipnet.IP.IsLoopback() {
+				loopback = ipnet
+				continue
+			}
+
 			if cidr == nil {
-				if ipnet.IP.IsLoopback() {
-					loopback = ipnet
-					continue
-				}
 				if ipnet.IP.To4() != nil {
+					log.Info("[software_polardb_runner] init ip. no cidr found, use the first IP",
+						log.String("ip", ipnet.IP.String()))
 					rr.addr = ipnet
 					return nil
 				}
 			} else {
 				if err == nil && cidr.Contains(ipnet.IP) {
+					log.Info("[software_polardb_runner] init ip using cidr",
+						log.String("ip", ipnet.IP.To4().String()))
 					rr.addr = ipnet
 					return nil
 				} else {
-					rr.addr = ipnet
-					return nil
+					log.Info("[software_polardb_runner] init ip. cidr does not contains IP",
+						log.String("cidr", cidr.String()),
+						log.String("ip", ipnet.IP.String()))
+					if ipnet.IP.To4() != nil {
+						rr.addr = ipnet
+					}
 				}
 			}
 		}
 	}
 
-	if loopback != nil {
+	if rr.addr == nil && loopback != nil {
+		log.Info("[software_polardb_runner] init ip use loopback")
 		rr.addr = loopback
 		return nil
 	}
+
+	log.Info("[software_polardb_runner] init ip without matching cidr, we use the last ip",
+		log.String("ip", rr.addr.IP.To4().String()))
 
 	return fmt.Errorf("no ip addr match cidr: %s", cidr.String())
 }

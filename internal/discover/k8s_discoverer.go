@@ -169,14 +169,12 @@ func (d *K8sDiscoverer) enumerateContainer() {
 						// read hostconfig.json for more infomation.
 						hostconfigfile := fmt.Sprintf("%s/%s/hostconfig.json", d.WorkDir, containerID)
 						if fi, err := os.Stat(hostconfigfile); err != nil || fi.IsDir() {
-							log.Warn("[k8s_discoverer] hostconfig.json file not found, "+
-								"but we will ignore it now.",
+							log.Warn("[k8s_discoverer] hostconfig.json file not found, but we will ignore it now.",
 								log.String("file", hostconfigfile))
 						} else {
 							err := readFile(hostconfigfile, &d.buf)
 							if err != nil {
-								log.Warn("[k8s_discoverer] read hostconfig.json failed, "+
-									"but we will ignore it now.",
+								log.Warn("[k8s_discoverer] read hostconfig.json failed, but we will ignore it now.",
 									log.String("file", hostconfigfile),
 									log.String("err", err.Error()))
 							} else {
@@ -187,8 +185,7 @@ func (d *K8sDiscoverer) enumerateContainer() {
 
 						d.containers[containerID] = containerInfo
 						log.Info("[k8s_discoverer]  container first running",
-							log.String("containerId", containerInfo.ContainerID),
-							log.Bool("running", containerInfo.Running))
+							log.String("containerId", containerInfo.ContainerID), log.Bool("running", containerInfo.Running))
 					}
 				}
 			} else {
@@ -220,13 +217,11 @@ func (d *K8sDiscoverer) enumerateContainer() {
 				pauseContainer, ok := activeContainers[pauseID]
 				if !ok {
 					log.Warn("[k8s_discoverer] pause container is not alive",
-						log.String("pause container ID", pauseID),
-						log.String("container ID", containerInfo.ContainerID))
+						log.String("pause container ID", pauseID), log.String("container ID", containerInfo.ContainerID))
 					delete(d.containers, containerInfo.ContainerID)
 					continue
 				}
-				containerInfo.Labels["apsara.metric.store.pbd_number"] =
-				pauseContainer.Labels["apsara.metric.store.pbd_number"]
+				containerInfo.Labels["apsara.metric.store.pbd_number"] = pauseContainer.Labels["apsara.metric.store.pbd_number"]
 				containerInfo.Labels[consts.ApsaraMetricInsID] = pauseContainer.Labels[consts.ApsaraMetricInsID]
 				containerInfo.Labels[consts.ApsaraMetricLogicCustinsID] = pauseContainer.Labels[consts.ApsaraMetricLogicCustinsID]
 				containerInfo.Labels[consts.ApsaraMetricPhysicalCustinsID] = pauseContainer.Labels[consts.ApsaraMetricPhysicalCustinsID]

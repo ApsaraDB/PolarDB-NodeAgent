@@ -307,11 +307,12 @@ func main() {
 	var perfport int
 
 	flag.BoolVar(&printversion, "v", false, "print version info")
-	flag.IntVar(&perfport, "p", 9060, "perf port")
+	flag.IntVar(&perfport, "p", 9080, "perf port")
 	flag.Parse()
 
 	if printversion {
-		fmt.Printf("go version: %s\ncompiler: %s\nbuildtime: %s\nplarform: %s\n"+
+		fmt.Printf("rpm name: %s\nrpm release: %s\nrpm version: %s\n"+
+			"go version: %s\ncompiler: %s\nbuildtime: %s\nplarform: %s\n"+
 			"git branch: %s\ncommit id: %s\n",
 			utils.RpmName, utils.RpmRelease, utils.RpmVersion, runtime.Version(), runtime.Compiler,
 			utils.Buildtime, fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
@@ -326,10 +327,10 @@ func main() {
 	// 	return
 	// }
 	basepath := utils.GetBasePath()
-	os.MkdirAll(basepath + "/offset", 0755)
+	os.MkdirAll(basepath+"/offset", 0755)
 	ok, err := utils.LockFile(basepath + "/universe.lock")
 	if !ok || err != nil {
-		e := fmt.Sprint("LockFile %s return false")
+		e := "LockFile return false"
 		if err != nil {
 			e = err.Error()
 		}
