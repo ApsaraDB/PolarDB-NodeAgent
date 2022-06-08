@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * dao.go
- *    Dao for database backend
+ *    data access object for database backend
  *
  *
  * Copyright (c) 2021, Alibaba Group Holding Limited
@@ -38,9 +38,8 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/log"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/db_config"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/logger"
 )
 
 const DATAMODEL_CONFIG_TABLE = "meta_data_model_config"
@@ -75,7 +74,7 @@ type Instance struct {
 	hasinit  bool
 	version  uint64
 	dimcache map[string]int
-	logger   *logger.PluginLogger
+	logger   *log.PluginLogger
 
 	Tables   []*TimeSeriesTable `json:"tables"`
 	TableMap map[string]*TimeSeriesTable
@@ -118,7 +117,7 @@ type DBManager struct {
 	Databases []*Database `json:"db_schemas"`
 	dbconf    map[string]*Database
 	path      string
-	logger    *logger.PluginLogger
+	logger    *log.PluginLogger
 
 	mutex    sync.Mutex
 	insmutex map[string]*sync.Mutex
@@ -143,7 +142,7 @@ func (s *DBManager) Init(conf string, path string) error {
 	defer s.mutex.Unlock()
 
 	if !s.hasinit {
-		s.logger = logger.NewPluginLogger("db_manager", make(map[string]string))
+		s.logger = log.NewPluginLogger("db_manager", make(map[string]string))
 
 		if err = s.initFromConf(conf); err != nil {
 			s.logger.Error("init db template failed", err, log.String("conf", conf))
@@ -529,7 +528,7 @@ func (ins *Instance) Init(name string,
 		ins.HighPriorityAsyncChannel = make(chan *AsyncInsertData, 40)
 		ins.dimcache = make(map[string]int)
 
-		ins.logger = logger.NewPluginLogger("dao",
+		ins.logger = log.NewPluginLogger("dao",
 			map[string]string{"ins": name, "schema": dbinfo.Schema})
 
 		// 	we do not close it and this will leak,

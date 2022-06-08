@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * pfs_collector.go
- *    Pfs collector for polardb pg
+ *    collect pfs disk usage
  *
  *
  * Copyright (c) 2021, Alibaba Group Holding Limited
@@ -18,15 +18,14 @@
  * limitations under the License.
  *
  * IDENTIFICATION
- *           plugins/polardb_pg_opensource/collector/pfs_collector.go
+ *           plugins/polardb_pg_opensource/resource/fs/pfs_collector.go
  *-------------------------------------------------------------------------
  */
-package collector
+package fs
 
 import (
 	"bytes"
 	"fmt"
-	"os/exec"
 	"path"
 	"strconv"
 	"strings"
@@ -34,9 +33,8 @@ import (
 	"time"
 
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/logger"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/utils"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/utils"
 
 	_ "github.com/lib/pq"
 )
@@ -44,15 +42,12 @@ import (
 const (
 	PFSCmdTimeout              = 5
 	PFSUsageCollectInterval    = 240
-	PFSIOCollectInterval       = 15
 	PFSDiskInfoCollectInterval = 15
 )
 
 type PbdInfo struct {
-	pbdNum          string
 	plsPrefix       string
 	pfsUsageInfoMap *sync.Map
-	pfsIOInfoMap    *sync.Map
 	pfsDiskInfoMap  *sync.Map
 }
 
@@ -62,28 +57,26 @@ type PfsCollector struct {
 	DBType      string
 	Environment string
 	pbdInfo     PbdInfo
-	logger      *logger.PluginLogger
+	logger      *log.PluginLogger
+	cli         *utils.CommandExecutor
 	stopped     chan int
 }
 
 func NewPfsCollector() *PfsCollector {
-	collector := &PfsCollector{hasInit: false}
+	collector := &PfsCollector{
+		hasInit: false,
+		cli:     utils.NewCommandExecutor(),
+	}
 	collector.pbdInfo = PbdInfo{
 		pfsUsageInfoMap: &sync.Map{},
-		pfsIOInfoMap:    &sync.Map{},
 		pfsDiskInfoMap:  &sync.Map{},
 	}
 	return collector
 }
 
-func (p *PfsCollector) getPrefix(m map[string]interface{}) string {
-        envs := m["env"].(map[string]string)
-        pvname := envs["apsara.metric.pv_name"]
-        return fmt.Sprintf("mapper_%s", pvname)
-}
-
-func (p *PfsCollector) Init(m map[string]interface{}, logger *logger.PluginLogger) error {
+func (p *PfsCollector) Init(m map[string]interface{}, logger *log.PluginLogger) error {
 	if !p.hasInit {
+		p.logger = logger
 		p.hasInit = true
 
 		envs := m["env"].(map[string]string)
@@ -91,10 +84,24 @@ func (p *PfsCollector) Init(m map[string]interface{}, logger *logger.PluginLogge
 		p.DBType = m["dbtype"].(string)
 		p.Environment = m["environment"].(string)
 
-		p.pbdInfo.pbdNum = envs["apsara.metric.store.pbd_number"]
-		p.pbdInfo.plsPrefix = p.getPrefix(m)
+		p.pbdInfo.plsPrefix = "None"
+		// public cloud
+		if pbdNum, ok := envs["apsara.metric.store.pbd_number"]; ok {
+			p.pbdInfo.plsPrefix = fmt.Sprintf("%s-1", pbdNum)
+		} else {
+			// dbstack
+			if pvname, ok := envs["apsara.metric.pv_name"]; ok {
+				p.pbdInfo.plsPrefix = fmt.Sprintf("mapper_%s", pvname)
+			} else {
+				p.logger.Warn("pbd init failed, neither pbd_num nor pv_name exists", nil)
+			}
+		}
 		p.stopped = make(chan int)
-		p.logger = logger
+
+		if err := p.cli.Init(); err != nil {
+			p.logger.Warn("command line executor init failed", err)
+			return err
+		}
 
 		go p.collectloop()
 
@@ -109,16 +116,12 @@ func (p *PfsCollector) Init(m map[string]interface{}, logger *logger.PluginLogge
 
 func (p *PfsCollector) collectloop() {
 	usageTimer := time.NewTimer(PFSUsageCollectInterval * time.Second)
-	ioTimer := time.NewTimer(PFSIOCollectInterval * time.Second)
 	diskInfoTimer := time.NewTimer(PFSDiskInfoCollectInterval * time.Second)
 
 	p.logger.Info("pfs collect loop start")
 
 	p.collectPfsDiskInfo()
 	p.collectPfsDiskUsage()
-	if p.Environment == "public_cloud" {
-		p.collectPfsDiskIO()
-	}
 
 	for {
 		select {
@@ -129,12 +132,6 @@ func (p *PfsCollector) collectloop() {
 			p.logger.Debug("pfs usage collect loop")
 			p.collectPfsDiskUsage()
 			usageTimer.Reset(PFSUsageCollectInterval * time.Second)
-		case <-ioTimer.C:
-			if p.Environment == "public_cloud" {
-				p.logger.Debug("pfs io info collect loop")
-				p.collectPfsDiskIO()
-			}
-			ioTimer.Reset(PFSIOCollectInterval * time.Second)
 		case <-diskInfoTimer.C:
 			p.logger.Debug("pfs disk info collect loop")
 			p.collectPfsDiskInfo()
@@ -171,77 +168,14 @@ func (p *PfsCollector) collectPfsDiskUsage() error {
 			return nil
 		}
 
+		size, _ := strconv.ParseUint(dirsize[0], 10, 64)
 		dirname := path.Base(dirsize[1])
+		p.pbdInfo.pfsUsageInfoMap.Store("pls_"+dirname+"_dir_size", size/1024)
 		switch dirname {
-		case "data":
-			fallthrough
 		case "base":
-			fallthrough
+			p.pbdInfo.pfsUsageInfoMap.Store("polar_base_dir_size", size/1024)
 		case "pg_wal":
-			size, _ := strconv.ParseUint(dirsize[0], 10, 64)
-			// turn to MB
-			p.pbdInfo.pfsUsageInfoMap.Store("pls_"+dirname+"_dir_size", size/1024)
-		}
-	}
-
-	return nil
-}
-
-func (p *PfsCollector) collectPfsDiskIO() error {
-	var res string
-	var err error
-
-	// pfs iostat
-	pfsMagicNum := "4294967292"
-	plsadminCmd := fmt.Sprintf("plsadmin iostat %s-3-%s-1", pfsMagicNum, p.pbdInfo.pbdNum)
-
-	if res, err = p.ExecCommand(plsadminCmd); err != nil {
-		p.logger.Error("exec plsadmin failed", err, log.String("command", plsadminCmd))
-		return err
-	} else {
-		var iopsR, iopsW, iops float64
-		var ioThroughputR, ioThroughputW, ioThroughput float64
-		var ioUtil float64
-		var avgQueueSize float64
-		var ioLatencyR, ioLatencyW float64
-		var found bool
-
-		found = false
-		for _, line := range strings.Split(res, "\n") {
-			if strings.HasPrefix(line, pfsMagicNum) {
-
-				items := strings.Fields(line)
-
-				iopsR = ParseFloat(items[1])
-				iopsW = ParseFloat(items[2])
-				iops = iopsR + iopsW
-				// unit: MB
-				ioThroughputR = ParseFloat(items[3])
-				ioThroughputW = ParseFloat(items[4])
-				ioThroughput = ioThroughputR + ioThroughputW
-				ioLatencyR = ParseFloat(items[8])
-				ioLatencyW = ParseFloat(items[9])
-				ioUtil = ParseFloat(strings.TrimSuffix(items[10], "%"))
-
-				found = true
-
-				break
-			}
-		}
-
-		if found {
-			p.pbdInfo.pfsIOInfoMap.Store("pls_iops_read", iopsR)
-			p.pbdInfo.pfsIOInfoMap.Store("pls_iops_write", iopsW)
-			p.pbdInfo.pfsIOInfoMap.Store("pls_iops", iops)
-			p.pbdInfo.pfsIOInfoMap.Store("pls_throughput_read", ioThroughputR)
-			p.pbdInfo.pfsIOInfoMap.Store("pls_throughput_write", ioThroughputW)
-			p.pbdInfo.pfsIOInfoMap.Store("pls_throughput", ioThroughput)
-			p.pbdInfo.pfsIOInfoMap.Store("pls_latency_read", ioLatencyR)
-			p.pbdInfo.pfsIOInfoMap.Store("pls_latency_write", ioLatencyW)
-			p.pbdInfo.pfsIOInfoMap.Store("pls_queue_size", avgQueueSize)
-			p.pbdInfo.pfsIOInfoMap.Store("pls_ioutil", ioUtil)
-		} else {
-			p.logger.Info("invalid result of plsadmin iostat", log.String("detail", string(res)))
+			p.pbdInfo.pfsUsageInfoMap.Store("polar_wal_dir_size", size/1024)
 		}
 	}
 
@@ -306,9 +240,9 @@ func (p *PfsCollector) parseInode(fields []string) error {
 
 	p.pbdInfo.pfsDiskInfoMap.Store("pls_inode_total", inodeTotal)
 	p.pbdInfo.pfsDiskInfoMap.Store("pls_inode_used", inodeUsed)
-    if inodeTotal > 0 {
-	    p.pbdInfo.pfsDiskInfoMap.Store("pls_inode_usage", float64(inodeUsed*100)/float64(inodeTotal))
-    }
+	if inodeTotal > 0 {
+		p.pbdInfo.pfsDiskInfoMap.Store("pls_inode_usage", float64(inodeUsed*100)/float64(inodeTotal))
+	}
 
 	return err
 }
@@ -322,9 +256,9 @@ func (p *PfsCollector) parseDirentry(fields []string) error {
 
 	p.pbdInfo.pfsDiskInfoMap.Store("pls_direntry_total", direntryTotal)
 	p.pbdInfo.pfsDiskInfoMap.Store("pls_direntry_used", direntryUsed)
-    if direntryTotal > 0 {
-	    p.pbdInfo.pfsDiskInfoMap.Store("pls_direntry_usage", float64(direntryUsed*100)/float64(direntryTotal))
-    }
+	if direntryTotal > 0 {
+		p.pbdInfo.pfsDiskInfoMap.Store("pls_direntry_usage", float64(direntryUsed*100)/float64(direntryTotal))
+	}
 
 	return nil
 }
@@ -340,7 +274,7 @@ func (p *PfsCollector) parseBlktag(fields []string) error {
 		return fmt.Errorf("parse nchild failed: %v", fields)
 	}
 
-	nchild, err := utils.ToUint64(strings.TrimSuffix(nchildArray[1], ","))
+	nchild, err := strconv.ParseUint(strings.TrimSuffix(nchildArray[1], ","), 10, 64)
 	if err != nil {
 		return err
 	}
@@ -349,20 +283,20 @@ func (p *PfsCollector) parseBlktag(fields []string) error {
 	// 10G in each chunk
 	p.pbdInfo.pfsDiskInfoMap.Store("pls_blk_total", blkTotal)
 	p.pbdInfo.pfsDiskInfoMap.Store("pls_blk_used", blkUsed)
-    if blkTotal > 0 {
-	    totalUsedSize := uint64(float64(nchild*10*1024*1024) * (float64(blkUsed) / float64(blkTotal)))
-	    p.pbdInfo.pfsDiskInfoMap.Store("pls_user_data_size", totalUsedSize)
-	    p.pbdInfo.pfsDiskInfoMap.Store("pls_blk_usage", float64(blkUsed*100)/float64(blkTotal))
-    }
+	if blkTotal > 0 {
+		totalUsedSize := uint64(float64(nchild*10*1024*1024) * (float64(blkUsed) / float64(blkTotal)))
+		p.pbdInfo.pfsDiskInfoMap.Store("pls_user_data_size", totalUsedSize)
+		p.pbdInfo.pfsDiskInfoMap.Store("pls_blk_usage", float64(blkUsed*100)/float64(blkTotal))
+	}
 	return nil
 }
 
 func (p *PfsCollector) getPbdInfoField(fields []string) (uint64, uint64, error) {
-	total, err := utils.ToUint64(strings.TrimSuffix(fields[7], ","))
+	total, err := strconv.ParseUint(strings.TrimSuffix(fields[7], ","), 10, 64)
 	if err != nil {
 		return 0, 0, err
 	}
-	free, err := utils.ToUint64(strings.TrimSuffix(fields[9], ","))
+	free, err := strconv.ParseUint(strings.TrimSuffix(fields[9], ","), 10, 64)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -414,25 +348,6 @@ func (p *PfsCollector) collectPfsUsageResult(out map[string]interface{}) error {
 	return nil
 }
 
-func (p *PfsCollector) collectPfsIOResult(out map[string]interface{}) error {
-	rangeFunc := func(key, value interface{}) bool {
-		if intv, ok := value.(uint64); ok {
-			out[key.(string)] = intv
-			return true
-		}
-
-		if floatv, ok := value.(float64); ok {
-			out[key.(string)] = floatv
-			return true
-		}
-
-		return true
-	}
-
-	p.pbdInfo.pfsIOInfoMap.Range(rangeFunc)
-	return nil
-}
-
 func (p *PfsCollector) collectPfsDiskResult(out map[string]interface{}) error {
 	rangeFunc := func(key, value interface{}) bool {
 		if intv, ok := value.(uint64); ok {
@@ -479,16 +394,18 @@ func (p *PfsCollector) collectPfsFormalizeResult(out map[string]interface{}) err
 		}
 	}
 
+	out["enable_pfs"] = uint64(1)
+	if _, ok := out["pls_base_dir_size"]; ok {
+		out["polar_base_dir_size"] = out["pls_base_dir_size"]
+		out["polar_wal_dir_size"] = out["pls_pg_wal_dir_size"]
+	}
+
 	return nil
 }
 
 func (p *PfsCollector) Collect(out map[string]interface{}) error {
 	if err := p.collectPfsUsageResult(out); err != nil {
 		p.logger.Error("collect pfs usage info failed.", err)
-	}
-
-	if err := p.collectPfsIOResult(out); err != nil {
-		p.logger.Error("collect pfs io info failed.", err)
 	}
 
 	if err := p.collectPfsDiskResult(out); err != nil {
@@ -505,12 +422,15 @@ func (p *PfsCollector) Collect(out map[string]interface{}) error {
 func (p *PfsCollector) Stop() error {
 	p.stopped <- 1
 
+	p.cli.Close()
+
 	return nil
 }
 
 func (p *PfsCollector) ExecCommand(cmd string) (string, error) {
-	fullcmd := exec.Command("timeout", strconv.Itoa(PFSCmdTimeout), "bash", "-c", cmd)
-	res, err := fullcmd.Output()
+	// fullcmd := exec.Command("timeout", strconv.Itoa(PFSCmdTimeout), "bash", "-c", cmd)
+	fullcmd := fmt.Sprintf("timeout %d %s", PFSCmdTimeout, cmd)
+	res, err := p.cli.ExecCommand(fullcmd)
 	if err != nil {
 		p.logger.Error("exec command failed", err, log.String("command", cmd))
 		return "", err

@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	// "github.com/klauspost/compress/zstd"
+
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/utils"

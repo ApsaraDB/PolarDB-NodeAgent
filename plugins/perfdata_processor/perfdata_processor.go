@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * perfdata_processor.go
- *    Perf data processor Plugin
+ *    perf data processor between metric collect plugin and backend
  *
  *
  * Copyright (c) 2021, Alibaba Group Holding Limited
@@ -34,8 +34,13 @@ import (
 	"github.com/ApsaraDB/PolarDB-NodeAgent/internal/gather"
 
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/log"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/meta"
+)
+
+const (
+	KEY_SEND_TO_MULTIBACKEND = "send_to_multibackend"
+	KEY_MULTIDIMENSION       = "multidimension"
 )
 
 type PolarDBPGConfig struct {
@@ -201,13 +206,14 @@ func rebuildPolarDBPG(in map[string]interface{},
 	dbWhiteListMap := make(map[string]string)
 	dbBlackListMap := make(map[string]string)
 
-	out["dbmetrics"] = make([]map[string]interface{}, 1)
-	if _, ok := in["send_to_multibackend"]; ok {
-		out["dbmetrics"].([]map[string]interface{})[0] = in["send_to_multibackend"].(map[string]interface{})
+	var dbmetrics map[string]interface{}
+	if _, ok := in[KEY_SEND_TO_MULTIBACKEND]; ok {
+		out["dbmetrics"] = make([]map[string]interface{}, 1)
+		out["dbmetrics"].([]map[string]interface{})[0] = in[KEY_SEND_TO_MULTIBACKEND].(map[string]interface{})
+		dbmetrics = out["dbmetrics"].([]map[string]interface{})[0]
 	} else {
-		out["dbmetrics"].([]map[string]interface{})[0] = make(map[string]interface{})
+		dbmetrics = make(map[string]interface{})
 	}
-	dbmetrics := out["dbmetrics"].([]map[string]interface{})[0]
 
 	if dbEnableWhiteList > 0 {
 		whiteListStr := GetConfigMapValue(configmap,
@@ -226,7 +232,7 @@ func rebuildPolarDBPG(in map[string]interface{},
 	}
 
 	for k, v := range in {
-		if k == "send_to_multibackend" {
+		if k == KEY_SEND_TO_MULTIBACKEND || k == KEY_MULTIDIMENSION {
 			continue
 		}
 
@@ -260,6 +266,12 @@ func rebuildPolarDBPG(in map[string]interface{},
 			x[k] = value
 		} else {
 			dbmetrics[k] = value
+		}
+	}
+
+	if _, ok := in[KEY_MULTIDIMENSION]; ok {
+		for k, v := range in[KEY_MULTIDIMENSION].(map[string]interface{}) {
+			out[k] = v
 		}
 	}
 
@@ -662,7 +674,7 @@ func GetConfigMapValue(m map[string]interface{},
 func init() {
 	ETLHandlerMap = map[string]ETLHandler{
 		"polardb_pg_collector":                rebuildPolarDBPG,
-		"polardb_pg_multidimension_collector": rebuildGeneralMap,
+		"polardb_pg_multidimension_collector": rebuildPolarDBPG,
 		"sar":                                 rebuildSarMap,
 		"perf":                                rebuildGeneralMap,
 		"maxscale_perf":                       rebuildMaxscale,

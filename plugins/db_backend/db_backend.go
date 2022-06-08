@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * db_backend.go
- *    Database backend plugin
+ *    database backend
  *
  *
  * Copyright (c) 2021, Alibaba Group Holding Limited
@@ -38,7 +38,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/log"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/control_service"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/db_config"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/meta"

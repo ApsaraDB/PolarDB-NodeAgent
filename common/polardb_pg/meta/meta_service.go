@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * meta_service.go
- *    Meta service for collector
+ *    local service for polardb pg instance meta info
  *
  *
  * Copyright (c) 2021, Alibaba Group Holding Limited
