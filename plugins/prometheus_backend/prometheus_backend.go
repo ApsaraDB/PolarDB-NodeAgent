@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * prometheus_backend.go
- *    Prometheus Plugin
+ *    prometheus backend
  *
  *
  * Copyright (c) 2021, Alibaba Group Holding Limited
@@ -39,7 +39,7 @@ import (
 	"time"
 
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/log"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/meta"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/plugins/db_backend/dao"
 )

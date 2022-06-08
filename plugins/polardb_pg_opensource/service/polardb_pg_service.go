@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * polardb_pg_service.go
- *    Polardb pg metrics Provider
+ *    polardb pg metric service for cluster manager
  *
  *
  * Copyright (c) 2021, Alibaba Group Holding Limited
@@ -21,7 +21,6 @@
  *           plugins/polardb_pg_opensource/service/polardb_pg_service.go
  *-------------------------------------------------------------------------
  */
-
 package service
 
 import (
@@ -33,7 +32,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/log"
 )
 
 const (

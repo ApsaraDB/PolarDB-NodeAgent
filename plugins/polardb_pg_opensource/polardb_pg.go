@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * polardb_pg.go
- *    Polardb pg collector plugin
+ *    Polardb pg metrics collector plugin wrapper
  *
  *
  * Copyright (c) 2021, Alibaba Group Holding Limited
@@ -29,7 +29,7 @@ import (
 	"github.com/ApsaraDB/PolarDB-NodeAgent/plugins/polardb_pg_opensource/service"
 
 	_ "github.com/lib/pq"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/log"
 	pg "github.com/ApsaraDB/PolarDB-NodeAgent/plugins/polardb_pg_opensource/collector"
 )
 
