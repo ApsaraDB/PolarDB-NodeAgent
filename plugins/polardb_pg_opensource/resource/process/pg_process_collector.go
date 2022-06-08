@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * pg_process_collector.go
- *    Polardb pg processes info collector
+ *    collect polardb pg process resource
  *
  *
  * Copyright (c) 2021, Alibaba Group Holding Limited
@@ -18,10 +18,10 @@
  * limitations under the License.
  *
  * IDENTIFICATION
- *           plugins/polardb_pg_opensource/collector/pg_process_collector.go
+ *           plugins/polardb_pg_opensource/resource/process/pg_process_collector.go
  *-------------------------------------------------------------------------
  */
-package collector
+package process
 
 import (
 	"bytes"
@@ -37,8 +37,7 @@ import (
 	"time"
 
 	"github.com/tklauser/go-sysconf"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/logger"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/log"
 
 	_ "github.com/lib/pq"
 )
@@ -89,11 +88,12 @@ type PgProcessResourceCollector struct {
 	buf               []byte
 	lbuf              []byte
 	count             uint64
-	logger            *logger.PluginLogger
+	logger            *log.PluginLogger
 	processes         map[string]*PgProcessResource
 	cgroup_tasks_path string
 	cpuCoreNumber     float64
 	intervalNano      int64
+	lastNano          int64
 	postmaster_pid    int64
 	datadir           string
 	prefix            *regexp.Regexp
@@ -109,7 +109,7 @@ func NewPgProcessResourceCollector() *PgProcessResourceCollector {
 }
 
 func (p *PgProcessResourceCollector) Init(m map[string]interface{},
-	logger *logger.PluginLogger) error {
+	logger *log.PluginLogger) error {
 
 	p.logger = logger
 
@@ -147,6 +147,8 @@ func (p *PgProcessResourceCollector) Init(m map[string]interface{},
 	}
 	p.tick = uint64(clkTck)
 
+	p.lastNano = 0
+
 	p.prefix = regexp.MustCompile(`postgres(\(\d+\))?: `)
 
 	return nil
@@ -156,10 +158,12 @@ func (p *PgProcessResourceCollector) Stop() error {
 	return nil
 }
 
-func (p *PgProcessResourceCollector) Collect(out map[string]interface{}, interval int64) error {
+func (p *PgProcessResourceCollector) Collect(out map[string]interface{}) error {
 	var buf []byte
 	p.count += 1
-	p.intervalNano = interval
+	nowNano := time.Now().UnixNano()
+	p.intervalNano = nowNano - p.lastNano
+	p.lastNano = nowNano
 
 	if p.postmaster_pid == int64(0) {
 		tasksfd, err := os.Open(p.cgroup_tasks_path)
@@ -501,14 +505,6 @@ func (p *PgProcessResourceCollector) getIoInfo(pid string, r *PgProcessResource)
 }
 
 func (p *PgProcessResourceCollector) buildResult(out map[string]interface{}) error {
-
-	cpuCores := p.cpuCoreNumber
-	if cpuCores == 0 {
-		cpuCores = 1
-	}
-
-	p.logger.Debug("process_cpu_info", log.Float64("cpuCores", cpuCores))
-	// cpuBackends := make(map[string]int)
 
 	for _, v := range p.processes {
 		if v.Count != p.count {

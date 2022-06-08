@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * control_service.go
- *    Metrics provider for cluster manager
+ *    control service for polardb pg collector
  *
  *
  * Copyright (c) 2021, Alibaba Group Holding Limited
@@ -32,7 +32,7 @@ import (
 	sync "sync"
 	"time"
 
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/log"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/control_service/polardb"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/meta"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/utils"

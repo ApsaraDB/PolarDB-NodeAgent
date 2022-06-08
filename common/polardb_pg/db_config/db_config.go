@@ -1,6 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * db_config.go
+ *    config from DB
  *
  *
  * Copyright (c) 2021, Alibaba Group Holding Limited
@@ -33,8 +34,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/logger"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/log"
 )
 
 const DATAMODEL = "dbmetrics"
@@ -63,7 +63,7 @@ type DBConfig struct {
 	db                       *sql.DB
 	configcenterdb           *sql.DB
 	collectConfigInitContext []interface{}
-	logger                   *logger.PluginLogger
+	logger                   *log.PluginLogger
 }
 
 type QueryCtx struct {
@@ -97,7 +97,7 @@ func (d *DBConfig) Init(
 	db *sql.DB,
 	configcenterdb *sql.DB,
 	collectConfigInitContext []interface{},
-	logger *logger.PluginLogger) error {
+	logger *log.PluginLogger) error {
 
 	d.insname = insname
 	d.schema = schema

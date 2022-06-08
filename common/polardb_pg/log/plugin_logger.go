@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * plugin_logger.go
- *    Logger for plugin
+ *    logger for polardb pg plugin
  *
  *
  * Copyright (c) 2021, Alibaba Group Holding Limited
@@ -18,10 +18,10 @@
  * limitations under the License.
  *
  * IDENTIFICATION
- *           common/polardb_pg/logger/plugin_logger.go
+ *           common/polardb_pg/log/plugin_logger.go
  *-------------------------------------------------------------------------
  */
-package logger
+package log
 
 import (
 	"fmt"
@@ -36,6 +36,10 @@ type PluginLogger struct {
 
 func NewPluginLogger(tag string, identifier map[string]string) *PluginLogger {
 	return &PluginLogger{tag: tag, identifier: identifier}
+}
+
+func (l *PluginLogger) SetTag(tag string) {
+	l.tag = tag
 }
 
 func (l *PluginLogger) SetIdentifier(identifier map[string]string) {
@@ -81,4 +85,80 @@ func (l *PluginLogger) Error(msg string, err error, fields ...log.Field) {
 	fieldlist = append(fieldlist, log.String("error", err.Error()))
 	fieldlist = append(fieldlist, fields...)
 	log.Error(l.logmsg(msg), fieldlist...)
+}
+
+func Binary(key string, val []byte) log.Field {
+    return log.Binary(key, val)
+}
+
+func Bool(key string, val bool) log.Field {
+    return log.Bool(key, val)
+}
+
+func ByteString(key string, val []byte) log.Field {
+    return log.ByteString(key, val)
+}
+
+func String(key string, val string) log.Field {
+    return log.String(key, val)
+}
+
+func Int(key string, val int) log.Field {
+    return log.Int(key, val)
+}
+
+func Int8(key string, val int8) log.Field {
+    return log.Int8(key, val)
+}
+
+func Int16(key string, val int16) log.Field {
+    return log.Int16(key, val)
+}
+
+func Int32(key string, val int32) log.Field {
+    return log.Int32(key, val)
+}
+
+func Int64(key string, val int64) log.Field {
+	return log.Int64(key, val)
+}
+
+func Uint(key string, val uint) log.Field {
+	return log.Uint(key, val)
+}
+
+func Uint8(key string, val uint8) log.Field {
+	return log.Uint8(key, val)
+}
+
+func Uint16(key string, val uint16) log.Field {
+	return log.Uint16(key, val)
+}
+
+func Uint32(key string, val uint32) log.Field {
+	return log.Uint32(key, val)
+}
+
+func Uint64(key string, val uint64) log.Field {
+	return log.Uint64(key, val)
+}
+
+func Float64(key string, val float64) log.Field {
+	return log.Float64(key, val)
+}
+
+func Debug(msg string, fields ...log.Field) {
+	log.Debug(msg, fields...)
+}
+
+func Info(msg string, fields ...log.Field) {
+	log.Info(msg, fields...)
+}
+
+func Warn(msg string, fields ...log.Field) {
+	log.Warn(msg, fields...)
+}
+
+func Error(msg string, fields ...log.Field) {
+	log.Error(msg, fields...)
 }

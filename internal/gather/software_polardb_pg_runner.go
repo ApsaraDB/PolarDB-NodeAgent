@@ -31,12 +31,8 @@ import (
 
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/consts"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/log"
-	"github.com/ApsaraDB/PolarDB-NodeAgent/internal/discover"
 	"github.com/ApsaraDB/PolarDB-NodeAgent/common/polardb_pg/config"
-)
-
-const (
-	MonitorConfPath = "conf/monitor.yaml"
+	"github.com/ApsaraDB/PolarDB-NodeAgent/internal/discover"
 )
 
 // SoftwarePolardbRunner struct
