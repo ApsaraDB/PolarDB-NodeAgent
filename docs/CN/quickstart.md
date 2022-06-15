@@ -2,11 +2,8 @@
 
 本文档介绍了如何安装和运行PolarDB-NodeAgent，并查看采集到的监控数据。
 
-对于PolarDB-for-PostgreSQL, PolarDB-NodeAgent默认在9974端口提供exporter服务, 供Prometheus收集数据, 具体配置可见[配置文档](configuration.md).
-此外, 还提供grafana dashboard配置方便展示.
-
-对于PolarDB-for-PostgreSQL, db-monitor默认把将监控数据写回数据库, 并在数据库内提供视图以供查询, 也可通过配置将监控数据推送给prometheus pushgateway, 具体配置可见[配置文档](configuration.md).
-此外, 对于监控数据存入数据库的场景, 还配有grafana dashboard方便展示.
+对于PolarDB-for-PostgreSQL, PolarDB-NodeAgent默认在9974端口提供exporter服务, 供Prometheus收集数据, 具体配置可见[配置文档](configuration.md)。
+此外, 还提供grafana dashboard配置方便展示。
 
 ## 安装
 

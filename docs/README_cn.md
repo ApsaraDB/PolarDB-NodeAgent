@@ -6,10 +6,6 @@ PolarDB-NodeAgent经受了阿里云线上真实环境的考验。
 
 PolarDB-NodeAgent目前开源了PolarDB-for-PostgreSQL引擎的监控采集
 
-db-monitor目前开源了PolarDB-for-PostgreSQL引擎的监控采集
-
-db-monitor目前开源了PolarDB-for-PostgreSQL引擎的监控采集
-
 阅读其它语言版本的文档: [English](README.md)
 
 ## 文档
