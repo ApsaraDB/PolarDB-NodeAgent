@@ -1,7 +1,6 @@
 # 配置
 
-*以下配置均为数据库和PolarDB-NodeAgent
-的默认配置, 如无特殊需求可以略过*
+*以下配置均为数据库和PolarDB-NodeAgent的默认配置, 如无特殊需求可以略过*
 
 ## 数据库发现
 由于`PolarDB-NodeAgent`部署于每一台数据库实例运行的主机, 每台主机上`PolarDB-NodeAgent`只采集本节点数据库实例的监控信息, 为了减少外部因素对于监控采集的干扰, `PolarDB-NodeAgent`将通过unix domain socket与数据库进行通信。`PolarDB-NodeAgent`与数据库之间推荐使用 peer authentication 的免密认证方式，免密范围可以限定在以指定操作系统账户启动的进程使用指定数据库账号通过 unix domain socket 的方式访问指定数据库。
